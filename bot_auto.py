@@ -1,12 +1,10 @@
 import telebot, os, random, time, json
+
 TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 6453478028
+OWNER_ID = 6453478028  # ايديك انت
 bot = telebot.TeleBot(TOKEN)
 
-users_welcomed = {}
 stopped_file = "stopped.json"
-
-# --- السطرين اللي طلبتهم للحفظ ---
 try:
     with open(stopped_file, "r") as f:
         stopped_users = set(json.load(f))
@@ -16,7 +14,6 @@ except:
 def save_stopped():
     with open(stopped_file, "w") as f:
         json.dump(list(stopped_users), f)
-# ---------------------------------
 
 FIRST_MSGS = [
     "هلا والله 🖤 أنا بوت أسود، صاحب الحساب مشغول حالياً",
@@ -141,45 +138,35 @@ RANDOM_REPLIES = [
     "شكلك تبغى تصير صديقي؟ ادفع اشتراك زبج أول",
     "أنا بوت، ما عندي واسطة، الكل سواسية في القصف"
 ]
-
-
+welcomed = {}
 def get_reply(uid):
-    if uid not in users_welcomed:
-        users_welcomed[uid] = True
+    if uid not in welcomed:
+        welcomed[uid] = True
         return random.choice(FIRST_MSGS)
     return random.choice(RANDOM_REPLIES)
 
-@bot.message_handler(func=lambda m: True)
-def handle_all(m):
-    chat_id = m.chat.id
-    if m.from_user.id == OWNER_ID:
-        txt = (m.text or "").strip().lower()
-        if txt == "ايقاف":
-            stopped_users.add(chat_id)
-            save_stopped()
-            bot.send_message(chat_id, "تم 🖤 وقفت البوت عن هذا الخاص فقط - وبيظل محفوظ حتى لو أعدت التشغيل")
-            return
-        if txt == "تفعيل":
-            stopped_users.discard(chat_id)
-            save_stopped()
-            bot.send_message(chat_id, "تم 🦦 رجعت شغلت البوت لهذا الخاص")
-            return
+@bot.message_handler(func=lambda m: m.from_user.id == OWNER_ID)
+def owner_cmd(m):
+    txt = (m.text or "").strip().lower()
+    cid = m.chat.id
+    if txt == "ايقاف":
+        stopped_users.add(cid)
+        save_stopped()
+        bot.send_message(cid, "تم 🖤 وقفت البوت عن هذا الشخص")
+    elif txt == "تفعيل":
+        stopped_users.discard(cid)
+        save_stopped()
+        bot.send_message(cid, "تم 🦦 رجعت شغلت البوت")
+    elif txt == "قائمة الموقوفين":
+        bot.send_message(cid, f"الموقوفين: {list(stopped_users) or 'مافي حد'}")
+
+@bot.message_handler(content_types=['text'], func=lambda m: m.from_user.id != OWNER_ID and m.chat.id not in stopped_users)
+def auto_reply(m):
+    if m.chat.type != 'private':
         return
+    bot.send_chat_action(m.chat.id, 'typing')
+    time.sleep(0.8)
+    bot.send_message(m.chat.id, get_reply(m.from_user.id))
 
-    if chat_id in stopped_users:
-        return
-
-    if m.chat.type == 'private':
-        bot.send_chat_action(chat_id, 'typing')
-        time.sleep(0.5)
-        bot.send_message(chat_id, get_reply(m.from_user.id))
-
-@bot.business_message_handler()
-def handle_business(m):
-    if m.from_user.id == OWNER_ID: return
-    if m.chat.id in stopped_users: return
-    bot.send_chat_action(m.chat.id, 'typing', business_connection_id=m.business_connection_id)
-    time.sleep(0.5)
-    bot.send_message(m.chat.id, get_reply(m.from_user.id), business_connection_id=m.business_connection_id)
-
+print("بوت أسود شغال...")
 bot.infinity_polling()
