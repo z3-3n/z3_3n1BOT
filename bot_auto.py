@@ -169,4 +169,32 @@ def auto_reply(m):
     bot.send_message(m.chat.id, get_reply(m.from_user.id))
 
 print("بوت أسود شغال...")
-bot.infinity_polling()
+from flask import Flask, request
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "ok"
+
+@app.route(f'/{TOKEN}', methods=['POST'])
+def webhook():
+    update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
+    bot.process_new_updates([update])
+    return "ok", 200
+
+# شغل ويب هوك بدل polling
+if os.getenv("PORT"):
+    bot.remove_webhook()
+    time.sleep(2)
+    domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+    if domain:
+        bot.set_webhook(url=f"https://{domain}/{TOKEN}")
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+else:
+    while True:
+        try:
+            bot.infinity_polling(timeout=60, long_polling_timeout=30)
+        except Exception as e:
+            print(e)
+            time.sleep(15)
