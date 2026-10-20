@@ -1,8 +1,11 @@
 import telebot, os, random, time, json
+from flask import Flask, request
 
 TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 6453478028  # ايديك انت
+OWNER_ID = 6453478028
 bot = telebot.TeleBot(TOKEN)
+
+app = Flask(__name__)
 
 stopped_file = "stopped.json"
 try:
@@ -138,6 +141,7 @@ RANDOM_REPLIES = [
     "شكلك تبغى تصير صديقي؟ ادفع اشتراك زبج أول",
     "أنا بوت، ما عندي واسطة، الكل سواسية في القصف"
 ]
+
 welcomed = {}
 def get_reply(uid):
     if uid not in welcomed:
@@ -168,33 +172,21 @@ def auto_reply(m):
     time.sleep(0.8)
     bot.send_message(m.chat.id, get_reply(m.from_user.id))
 
-print("بوت أسود شغال...")
-from flask import Flask, request
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "ok"
-
-@app.route(f'/{TOKEN}', methods=['POST'])
+@app.route('/webhook', methods=['POST'])
 def webhook():
     update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
     bot.process_new_updates([update])
     return "ok", 200
 
-if os.getenv("PORT"):
+@app.route('/')
+def home():
+    return "البوت شغال 🖤"
+
+if __name__ == "__main__":
     bot.remove_webhook()
-    time.sleep(2)
+    time.sleep(1)
     DOMAIN = "z33n1bot-production.up.railway.app"
-    url = f"https://{DOMAIN}/{TOKEN}"
+    url = f"https://{DOMAIN}/webhook"
     bot.set_webhook(url=url)
     print(f"Webhook set to {url}")
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
-else:
-    while True:
-        try:
-            bot.infinity_polling(timeout=60, long_polling_timeout=30)
-        except Exception as e:
-            print(e)
-            time.sleep(15)
