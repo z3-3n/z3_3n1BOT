@@ -179,17 +179,17 @@ def home():
 
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
-    update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
+    update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
     bot.process_new_updates([update])
     return "ok", 200
 
-# شغل ويب هوك بدل polling
 if os.getenv("PORT"):
     bot.remove_webhook()
     time.sleep(2)
-    domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
-    if domain:
-        bot.set_webhook(url=f"https://{domain}/{TOKEN}")
+    DOMAIN = "z33n1bot-production.up.railway.app"
+    url = f"https://{DOMAIN}/{TOKEN}"
+    bot.set_webhook(url=url)
+    print(f"Webhook set to {url}")
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
 else:
     while True:
