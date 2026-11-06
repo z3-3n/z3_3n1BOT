@@ -1,3 +1,2 @@
 telethon
-flask
-google-genai
+groq
