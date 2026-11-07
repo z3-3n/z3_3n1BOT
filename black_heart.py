@@ -16,16 +16,31 @@ from groq import Groq
 # Keep API_ID / API_HASH / STRING_SESSION in Replit Secrets.
 # =========================================================
 
-API_ID = int(os.getenv("API_ID") or "0")
-API_HASH = os.getenv("API_HASH") or ""
-STRING_SESSION = os.getenv("STRING_SESSION") or ""
-GROQ_API_KEY = os.getenv("GROQ_API_KEY") or ""
+try:
+    API_ID = int(os.environ["API_ID"])
+    API_HASH = os.environ["API_HASH"].strip()
+    STRING_SESSION = os.environ["STRING_SESSION"].strip()
+except KeyError as exc:
+    raise RuntimeError(f"متغير البيئة المطلوب غير مضبوط: {exc.args[0]}") from None
+except ValueError:
+    raise RuntimeError("قيمة API_ID غير صحيحة؛ يجب أن تكون رقماً.") from None
 
 if API_ID <= 0 or not API_HASH or not STRING_SESSION:
-    raise RuntimeError("تأكد من API_ID و API_HASH و STRING_SESSION داخل Secrets")
+    raise RuntimeError("تأكد من API_ID و API_HASH و STRING_SESSION في متغيرات البيئة.")
+
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 
 tg = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 client_ai = Groq(api_key=GROQ_API_KEY, timeout=35.0, max_retries=0) if GROQ_API_KEY else None
+
+# FadeHost keeps /data across deployments; store all bot state there.
+DATA_DIR = Path("/data")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+def data_file(filename):
+    path = Path(filename)
+    return path if path.is_absolute() else DATA_DIR / path
+
 
 SETTINGS_FILE = "settings.json"
 WELCOMED_FILE = "welcomed.json"
@@ -61,26 +76,27 @@ SYSTEM_QASF = (
 
 
 def load_json(filename, default):
+    path = data_file(filename)
     try:
-        path = Path(filename)
         if path.exists():
             with path.open("r", encoding="utf-8") as f:
                 value = json.load(f)
             if isinstance(value, type(default)):
                 return value
     except Exception as exc:
-        print(f"JSON LOAD ERROR ({filename}): {exc}")
+        print(f"JSON LOAD ERROR ({path.name}): {exc}")
     return default
 
 
 def save_json(filename, data):
-    tmp = filename + ".tmp"
+    path = data_file(filename)
+    tmp = path.with_name(path.name + ".tmp")
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        with tmp.open("w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, filename)
+        os.replace(tmp, path)
     except Exception as exc:
-        print(f"JSON SAVE ERROR ({filename}): {exc}")
+        print(f"JSON SAVE ERROR ({path.name}): {exc}")
 
 
 settings = load_json(SETTINGS_FILE, {"ai": True, "qasf": False})
