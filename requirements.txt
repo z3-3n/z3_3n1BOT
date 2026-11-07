@@ -1,2 +1,2 @@
-telethon
-groq
+Telethon==1.45.0
+groq==1.7.0
