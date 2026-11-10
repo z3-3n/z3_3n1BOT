@@ -1942,7 +1942,7 @@ def _xo_keyboard(chat_id, board):
         for col in range(3):
             index = row * 3 + col
             value = board[index]
-            label = value if value in ("X", "O") else "　"
+            label = value if value in ("X", "O") else "□"
             buttons.append(Button.inline(label, data=f"bhxo:{chat_id}:{index}".encode()))
         rows.append(buttons)
     return rows
