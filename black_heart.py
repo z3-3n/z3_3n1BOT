@@ -1834,14 +1834,14 @@ async def ai_qasf_one_liner(event):
 ASCII_ART = {
     # ASCII-only drawings: predictable width in Telegram monospace.
     "قلب": "   ##   ##\n  #### ####\n ###########\n  #########\n   #######\n    #####\n     ###\n      #",
-    "وردة": "    .-.-.\n  .'  *  '.\n /  * * *  \\\n \\   * *   /\n  '.  *  .'\n    `-.-'\n      |\n   \\  |  /\n    \\ | /\n      |\n     / \\",
-    "فراشة": "  .==.       .==.\n /    \\     /    \\\n(  **  )---(  **  )\n \\    /     \\    /\n  `--'       `--'\n      \\   /\n       \\ /",
-    "تاج": "       /\\\n  /\\ /  \\ /\\\n /  V      V  \\\n/______________\\\n|              |\n|______________|",
+    "وردة": "    .-.-.\n  .'  *  '.\n /  * * *  \\n \\   * *   /\n  '.  *  .'\n    `-.-'\n      |\n   \\  |  /\n    \\ | /\n      |\n     / \\",
+    "فراشة": "  .==.       .==.\n /    \\     /    \\n(  **  )---(  **  )\n \\    /     \\    /\n  `--'       `--'\n      \\   /\n       \\ /",
+    "تاج": "       /\\n  /\\ /  \\ /\\n /  V      V  \\n/______________\\n|              |\n|______________|",
     "نجمة": "      \\ | /\n    --- * ---\n      / | \\",
-    "قطة": " /^^\\\n( o.o )\n > ^ <",
-    "دب": " (o_o)\n /|_|\\\n  / \\",
+    "قطة": " /^^\\n( o.o )\n > ^ <",
+    "دب": " (o_o)\n /|_|\\n  / \\",
     "أرنب": " (\\_/ )\n ( o.o )\n / > <",
-    "بيت": "     /\\\n    /  \\\n   /____\\\n   | [] |\n   | __ |\n   |____|",
+    "بيت": "     /\\n    /  \\n   /____\\n   | [] |\n   | __ |\n   |____|",
     "سيارة": "      ______\n ____/|_||_\\____\n|  _         _  |\n'-(o)-------(o)-'",
     "شجرة": "      #\n     ###\n    #####\n   #######\n      |\n      |",
 }
@@ -1949,10 +1949,10 @@ def _xo_keyboard(chat_id, board):
 
 
 def _xo_text(board, status):
-    return "🎮 **BLACK HEART | XO**\\n\\n" + " | ".join(board[:3]) + "\\n-----------\\n" + " | ".join(board[3:6]) + "\\n-----------\\n" + " | ".join(board[6:]) + "\\n\\n" + status
+    return "🎮 **BLACK HEART | XO**\n\n" + " | ".join(board[:3]) + "\n-----------\n" + " | ".join(board[3:6]) + "\n-----------\n" + " | ".join(board[6:]) + "\n\n" + status
 
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.اكس او$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.اكس او$"))
 async def start_tic_tac_toe(event):
     board = ["·"] * 9
     GAME_STATE[str(event.chat_id)] = {"type": "xo", "board": board,
@@ -1961,7 +1961,7 @@ async def start_tic_tac_toe(event):
                      buttons=_xo_keyboard(event.chat_id, board))
 
 
-@tg.on(events.CallbackQuery(pattern=rb"^bhxo:-?\\d+:[0-8]$"))
+@tg.on(events.CallbackQuery(pattern=rb"^bhxo:-?\d+:[0-8]$"))
 async def tic_tac_toe_button(event):
     try:
         _, chat_value, pos_value = event.data.decode("utf-8").split(":")
