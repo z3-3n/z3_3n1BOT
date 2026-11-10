@@ -3,6 +3,7 @@ import json
 import time
 import asyncio
 import random
+import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
@@ -161,20 +162,55 @@ async def require_group_admin(event):
     return False
 
 
-async def ai_completion(prompt, system):
+MEMORY_DB = data_file("ai_memory.sqlite3")
+MEMORY_DAYS = 7
+MEMORY_LIMIT = 20
+
+def _memory_connection():
+    conn = sqlite3.connect(str(MEMORY_DB), timeout=20)
+    conn.execute("CREATE TABLE IF NOT EXISTS ai_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_memory ON ai_messages(chat_id,user_id,created_at)")
+    return conn
+
+def prune_ai_memory():
+    cutoff = int(time.time()) - MEMORY_DAYS * 86400
+    with _memory_connection() as conn:
+        conn.execute("DELETE FROM ai_messages WHERE created_at < ?", (cutoff,))
+
+def get_ai_history(chat_id, user_id):
+    cutoff = int(time.time()) - MEMORY_DAYS * 86400
+    with _memory_connection() as conn:
+        conn.execute("DELETE FROM ai_messages WHERE created_at < ?", (cutoff,))
+        rows = conn.execute("SELECT role,content FROM ai_messages WHERE chat_id=? AND user_id=? AND created_at>=? ORDER BY id DESC LIMIT ?", (str(chat_id),str(user_id),cutoff,MEMORY_LIMIT)).fetchall()
+    return [{"role":r,"content":c} for r,c in reversed(rows)]
+
+def save_ai_message(chat_id,user_id,role,content):
+    if content:
+        with _memory_connection() as conn:
+            conn.execute("INSERT INTO ai_messages(chat_id,user_id,role,content,created_at) VALUES(?,?,?,?,?)", (str(chat_id),str(user_id),role,str(content)[:12000],int(time.time())))
+
+try:
+    prune_ai_memory()
+except Exception as exc:
+    print("AI MEMORY INIT ERROR:", exc)
+
+async def ai_completion(prompt, system, history=None):
     if client_ai is None:
         return "⚠️ مفتاح GROQ_API_KEY غير مضبوط في Secrets."
 
     errors = []
-    for model in AI_MODELS:
+    selected_model = settings.get("selected_ai_model", AI_MODELS[0])
+    models_to_try = [selected_model] + [m for m in AI_MODELS if m != selected_model]
+    messages = [{"role":"system","content":system}]
+    if history:
+        messages.extend(history[-MEMORY_LIMIT:])
+    messages.append({"role":"user","content":prompt or "ابدأ الحديث"})
+    for model in models_to_try:
         try:
             response = await asyncio.to_thread(
                 client_ai.chat.completions.create,
                 model=model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": prompt or "ابدأ الحديث"},
-                ],
+                messages=messages,
                 temperature=0.7,
                 max_tokens=500,
             )
@@ -194,9 +230,9 @@ async def ai_completion(prompt, system):
     )
 
 
-async def ai_reply(prompt, system):
+async def ai_reply(prompt, system, history=None):
     try:
-        return await ai_completion(prompt, system)
+        return await ai_completion(prompt, system, history=history)
     except Exception as exc:
         print("AI FATAL ERROR:", exc)
         return "هلا والله 👋🏻 الذكاء مشغول حالياً، جرّب بعد قليل."
@@ -533,13 +569,24 @@ async def disable_qasf(event):
     await event.edit("✅ تم تعطيل وضع المزاح.")
 
 
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.تغيير النموذج(?:\s+(\d+))?$"))
+async def change_ai_model(event):
+    choice = event.pattern_match.group(1)
+    current = settings.get("selected_ai_model", AI_MODELS[0])
+    if not choice:
+        rows = "\n".join(f"{i}. `{m}`" + ("  ✅ الحالي" if m == current else "") for i,m in enumerate(AI_MODELS,1))
+        return await event.edit("🤖 **تغيير نموذج الذكاء**\n\n" + rows + "\n\nاختر بالأمر: `.تغيير النموذج 1` أو `.تغيير النموذج 2`")
+    index = int(choice)-1
+    if index < 0 or index >= len(AI_MODELS):
+        return await event.edit("❌ الرقم غير صحيح.")
+    settings["selected_ai_model"] = AI_MODELS[index]
+    save_json(SETTINGS_FILE, settings)
+    await event.edit("✅ تم اختيار النموذج:\n`" + AI_MODELS[index] + "`\nوسيُستخدم النموذج الاحتياطي تلقائياً إذا تعذّر.")
+    
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.النموذج$"))
 async def show_models(event):
-    await event.edit(
-        "🤖 **نماذج Groq الاحتياطية**\n\n"
-        + "\n".join(f"{i + 1}. `{m}`" for i, m in enumerate(AI_MODELS))
-        + "\n\nيجرّب السورس النموذج التالي تلقائياً إذا فشل السابق."
-    )
+    current = settings.get("selected_ai_model", AI_MODELS[0])
+    await event.edit("🤖 **النموذج الحالي:** `" + current + "`\nللعرض والتغيير استخدم `.تغيير النموذج`.")
 
 
 # ------------------------- Protection / group / profile -------------------------
@@ -882,9 +929,20 @@ async def incoming_handler(event):
         SYSTEM_FIRST if first_message else SYSTEM_NORMAL
     )
 
-    answer = await ai_reply(text_in, system)
+    user_key = str(event.sender_id)
+    try:
+        history = get_ai_history(chat_key, user_key)
+    except Exception as exc:
+        print("AI MEMORY READ ERROR:", exc)
+        history = []
+    answer = await ai_reply(text_in, system, history=history)
     try:
         await event.reply(answer)
+        try:
+            save_ai_message(chat_key, user_key, "user", text_in)
+            save_ai_message(chat_key, user_key, "assistant", answer)
+        except Exception as exc:
+            print("AI MEMORY SAVE ERROR:", exc)
         if first_message:
             welcomed[chat_key] = True
             save_json(WELCOMED_FILE, welcomed)
