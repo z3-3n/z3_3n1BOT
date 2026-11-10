@@ -57,9 +57,12 @@ AI_MODELS = [
 ]
 
 REPLY_STYLE = (
-    "اجعل الرد العادي من سطرين إلى ثلاثة أسطر كحد أقصى. "
-    "لا تقدم شرحاً مطولاً أو خطوات مفصلة إلا إذا طلب المستخدم المساعدة "
-    "أو الشرح أو طريقة تنفيذ شيء. عند طلب المساعدة، اشرح بوضوح وبالقدر اللازم."
+    "اجعل ردودك قصيرة وطبيعية كأنك صاحب الحساب نفسه، وغالباً جملة واحدة أو جملتان. "
+    "رد على مضمون الكلام مباشرة وبحسب السياق، ولا تحوّل كل رسالة إلى عرض خدمة. "
+    "ممنوع أن تختم تلقائياً بعبارات مثل: هل تحتاج مساعدة؟ هل أساعدك بشيء؟ "
+    "إذا احتجت شيئاً أخبرني، أنا هنا للمساعدة، أو أي عبارة مشابهة. "
+    "لا تسأل سؤالاً في نهاية كل رد؛ اسأل فقط إذا كان فهم الكلام يتطلب توضيحاً فعلاً. "
+    "لا تشرح بإسهاب إلا إذا طلب المستخدم شرحاً أو مساعدة، وعندها اشرح بالقدر اللازم."
 )
 
 SYSTEM_FIRST = (
@@ -910,7 +913,7 @@ async def incoming_handler(event):
 
     # Developer dot-commands are handled by the dedicated command bridge;
     # do not send an unrelated AI reply to those commands.
-    if incoming_text.startswith("."):
+    if incoming_text.startswith(".") and len(incoming_text) > 1 and incoming_text[1].isalnum():
         developer_ids = {str(x) for x in load_json("developers.json", [])}
         if sender_id in developer_ids:
             return
