@@ -908,6 +908,13 @@ async def incoming_handler(event):
         except Exception as exc:
             print("AUTO REPLY ERROR:", exc)
 
+    # Developer dot-commands are handled by the dedicated command bridge;
+    # do not send an unrelated AI reply to those commands.
+    if incoming_text.startswith("."):
+        developer_ids = {str(x) for x in load_json("developers.json", [])}
+        if sender_id in developer_ids:
+            return
+
     # AI can be paused globally or separately in each chat. Other commands,
     # games, and auto-replies remain available while AI is paused.
     if not settings.get("ai_global_enabled", settings.get("ai", True)):
