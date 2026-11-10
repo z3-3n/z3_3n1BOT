@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
-from telethon import TelegramClient, events, functions, types
+from telethon import TelegramClient, events, functions, types, Button
 from telethon.sessions import StringSession
 from groq import Groq
 
@@ -1832,17 +1832,18 @@ async def ai_qasf_one_liner(event):
 # ------------------------- Telegram-aligned ASCII art -------------------------
 
 ASCII_ART = {
-    "قلب": "       ♥♥     ♥♥\n     ♥♥♥♥   ♥♥♥♥\n   ♥♥♥♥♥♥♥♥♥♥♥♥♥\n    ♥♥♥♥♥♥♥♥♥♥♥\n      ♥♥♥♥♥♥♥\n        ♥♥♥\n         ♥",
-    "وردة": "       .-.-.\n     .'  ♥  '.\n    /  ♥ ♥ ♥  \\\n    \\   ♥ ♥   /\n     '.  ♥  .'\n       `-.-'\n         |\n      \\  |  /\n       \\ | /\n         |\n        / \\",
-    "فراشة": "   .==-.       .-==.\n  /  _  \\     /  _  \\\n (  (♥)  )---(  (♥)  )\n  \\     /     \\     /\n   `---'       `---'\n       \\     /\n        \\   /\n         \\ /",
-    "تاج": "          /\\\n     /\\  /  \\  /\\\n    /  \\/    \\/  \\\n   /              \\\n  /________________\\\n  |                |\n  |________________|",
-    "نجمة": "        \\  |  /\n         \\ | /\n      ----  ★  ----\n         / | \\\n        /  |  \\",
+    # ASCII-only drawings: predictable width in Telegram monospace.
+    "قلب": "   ##   ##\n  #### ####\n ###########\n  #########\n   #######\n    #####\n     ###\n      #",
+    "وردة": "    .-.-.\n  .'  *  '.\n /  * * *  \\\n \\   * *   /\n  '.  *  .'\n    `-.-'\n      |\n   \\  |  /\n    \\ | /\n      |\n     / \\",
+    "فراشة": "  .==.       .==.\n /    \\     /    \\\n(  **  )---(  **  )\n \\    /     \\    /\n  `--'       `--'\n      \\   /\n       \\ /",
+    "تاج": "       /\\\n  /\\ /  \\ /\\\n /  V      V  \\\n/______________\\\n|              |\n|______________|",
+    "نجمة": "      \\ | /\n    --- * ---\n      / | \\",
     "قطة": " /^^\\\n( o.o )\n > ^ <",
-    "دب": "  ʕ•ᴥ•ʔ\n /|   |\\\n  |___|",
+    "دب": " (o_o)\n /|_|\\\n  / \\",
     "أرنب": " (\\_/ )\n ( o.o )\n / > <",
-    "بيت": "       /\\\n      /  \\\n     /____\\\n     | [] |\n     | __ |\n     |____|",
-    "سيارة": "      ______\n ____/|_||_\\`.__\n(   _    _ _  _  \\\n =`-(_)--(_)-'",
-    "شجرة": "       /\\\n      /**\\\n     /****\\\n    /******\\\n       ||\n       ||",
+    "بيت": "     /\\\n    /  \\\n   /____\\\n   | [] |\n   | __ |\n   |____|",
+    "سيارة": "      ______\n ____/|_||_\\____\n|  _         _  |\n'-(o)-------(o)-'",
+    "شجرة": "      #\n     ###\n    #####\n   #######\n      |\n      |",
 }
 
 
@@ -1928,42 +1929,80 @@ async def stop_animation(event):
 
 # ------------------------- Playable mini-games -------------------------
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.اكس او$"))
-async def start_tic_tac_toe(event):
-    GAME_STATE[str(event.chat_id)] = {"type": "xo", "board": ["1","2","3","4","5","6","7","8","9"], "turn": str(event.sender_id)}
-    board = GAME_STATE[str(event.chat_id)]["board"]
-    await event.edit("🎮 لعبة XO بدأت! أنت X والخصم O.\n" + " | ".join(board[:3]) + "\n---------\n" + " | ".join(board[3:6]) + "\n---------\n" + " | ".join(board[6:]) + "\nاكتب `.حركة 5` مثلاً لاختيار خانة.")
 
-
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.حركة\s+([1-9])$"))
-async def tic_tac_toe_move(event):
-    state = GAME_STATE.get(str(event.chat_id))
-    if not state or state.get("type") != "xo":
-        return await event.edit("ابدأ اللعبة أولاً بالأمر `.اكس او`.")
-    board = state["board"]
-    pos = int(event.pattern_match.group(1)) - 1
-    if board[pos] in ("X", "O"):
-        return await event.edit("هذه الخانة محجوزة؛ اختر رقماً آخر.")
-    board[pos] = "X"
+def _xo_has_won(board, mark):
     wins = ((0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6))
-    def has_won(mark): return any(all(board[i] == mark for i in line) for line in wins)
-    if has_won("X"):
-        GAME_STATE.pop(str(event.chat_id), None)
-        return await event.edit("🎉 فزت!\n" + " | ".join(board[:3]) + "\n" + " | ".join(board[3:6]) + "\n" + " | ".join(board[6:]))
-    empty = [i for i, value in enumerate(board) if value not in ("X", "O")]
-    if empty:
-        # Simple opponent move: prefer center, then corners, then remaining.
-        choice = 4 if 4 in empty else random.choice(empty)
-        board[choice] = "O"
-    if has_won("O"):
-        GAME_STATE.pop(str(event.chat_id), None)
-        result = "🤖 فاز الخصم هذه المرة!"
-    elif not any(v not in ("X", "O") for v in board):
-        GAME_STATE.pop(str(event.chat_id), None)
-        result = "🤝 تعادل!"
-    else:
-        result = "دورك الآن: اختر خانة بالأمر `.حركة رقم`."
-    await event.edit("🎮 XO\n" + " | ".join(board[:3]) + "\n---------\n" + " | ".join(board[3:6]) + "\n---------\n" + " | ".join(board[6:]) + "\n" + result)
+    return any(all(board[i] == mark for i in line) for line in wins)
+
+
+def _xo_keyboard(chat_id, board):
+    rows = []
+    for row in range(3):
+        buttons = []
+        for col in range(3):
+            index = row * 3 + col
+            value = board[index]
+            label = value if value in ("X", "O") else "　"
+            buttons.append(Button.inline(label, data=f"bhxo:{chat_id}:{index}".encode()))
+        rows.append(buttons)
+    return rows
+
+
+def _xo_text(board, status):
+    return "🎮 **BLACK HEART | XO**\\n\\n" + " | ".join(board[:3]) + "\\n-----------\\n" + " | ".join(board[3:6]) + "\\n-----------\\n" + " | ".join(board[6:]) + "\\n\\n" + status
+
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.اكس او$"))
+async def start_tic_tac_toe(event):
+    board = ["·"] * 9
+    GAME_STATE[str(event.chat_id)] = {"type": "xo", "board": board,
+        "owner": int(event.sender_id), "turn": "X", "finished": False}
+    await event.edit(_xo_text(board, "دورك الآن — اضغط أحد المربعات."),
+                     buttons=_xo_keyboard(event.chat_id, board))
+
+
+@tg.on(events.CallbackQuery(pattern=rb"^bhxo:-?\\d+:[0-8]$"))
+async def tic_tac_toe_button(event):
+    try:
+        _, chat_value, pos_value = event.data.decode("utf-8").split(":")
+        chat_id, pos = int(chat_value), int(pos_value)
+        state = GAME_STATE.get(str(chat_id))
+        if not state or state.get("type") != "xo" or state.get("finished"):
+            return await event.answer("انتهت اللعبة أو لم تعد موجودة.", alert=True)
+        if int(event.sender_id or 0) != int(state["owner"]):
+            return await event.answer("هذه اللعبة ليست لك.", alert=True)
+        board = state["board"]
+        if state.get("turn") != "X":
+            return await event.answer("انتظر دورك.")
+        if board[pos] in ("X", "O"):
+            return await event.answer("هذه الخانة محجوزة؛ اختر غيرها.", alert=True)
+        board[pos] = "X"
+        if _xo_has_won(board, "X"):
+            await tg.edit_message(chat_id, event.query.msg_id, _xo_text(board, "🎉 فزت! انتهت اللعبة."), buttons=None)
+            GAME_STATE.pop(str(chat_id), None)
+            return await event.answer("مبروك الفوز!")
+        empty = [i for i, value in enumerate(board) if value not in ("X", "O")]
+        if empty:
+            choice = 4 if 4 in empty else random.choice(empty)
+            board[choice] = "O"
+        if _xo_has_won(board, "O"):
+            await tg.edit_message(chat_id, event.query.msg_id, _xo_text(board, "🤖 فاز الخصم هذه المرة."), buttons=None)
+            GAME_STATE.pop(str(chat_id), None)
+            return await event.answer("انتهت اللعبة.")
+        if not any(value not in ("X", "O") for value in board):
+            await tg.edit_message(chat_id, event.query.msg_id, _xo_text(board, "🤝 تعادل!"), buttons=None)
+            GAME_STATE.pop(str(chat_id), None)
+            return await event.answer("تعادل!")
+        await tg.edit_message(chat_id, event.query.msg_id,
+            _xo_text(board, "دورك الآن — اضغط مربعاً فارغاً."),
+            buttons=_xo_keyboard(chat_id, board))
+        await event.answer("تم تسجيل حركتك.")
+    except Exception as exc:
+        print("XO CALLBACK ERROR:", exc)
+        try:
+            await event.answer("تعذر تنفيذ الحركة؛ حاول مجدداً.", alert=True)
+        except Exception:
+            pass
 
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.خمن رقم$"))
@@ -2045,6 +2084,6 @@ async def hidden_mention_replied_user(event):
 MENU_PAGES[5] += "\n`.منشن مخفي` بالرد - منشن باسم ظاهر فقط\n`.منشن الكل` - منشن محدود حتى 20 عضواً\n`.منشن المشرفين` - منشن المشرفين\n`.الغاء المنشن` - إلغاء الأمر الحالي"
 MENU_PAGES[10] += "\n`.ايقاف ذكي هنا` / `.تشغيل ذكي هنا` - إيقاف/تشغيل الذكاء في المحادثة\n`.ايقاف الذكاء للكل` / `.تشغيل الذكاء للكل` - تحكم عام\n`.معلومة` / `.هل تعلم` / `.حظي` / `.قصف`"
 MENU_PAGES[11] += "\n`.اضف رد` - إضافة تفاعلية خطوة بخطوة\n`.تعديل رد الكلمة | الرد الجديد` - تعديل رد"
-MENU_PAGES[15] += "\n`.قلب` `.وردة` `.فراشة` `.تاج` `.نجمة` `.قطة` `.دب` `.أرنب` `.بيت` `.سيارة` `.شجرة`\n`.اسم الاسم` - رسم الاسم\n`.هه` / `.مح` / `.حب` - حركة رموز (21 تعديلاً)\n`.ايقاف الحركة` - إيقاف الحركة\n`.اكس او` / `.حركة 5` - لعبة XO\n`.خمن رقم` / `.تخمين 7` - لعبة تخمين\n`.الغاء اللعبة` - إنهاء اللعبة\n`.يوت اسم المقطع` - البحث في يوتيوب"
+MENU_PAGES[15] += "\n`.قلب` `.وردة` `.فراشة` `.تاج` `.نجمة` `.قطة` `.دب` `.أرنب` `.بيت` `.سيارة` `.شجرة`\n`.اسم الاسم` - رسم الاسم\n`.هه` / `.مح` / `.حب` - حركة رموز (21 تعديلاً)\n`.ايقاف الحركة` - إيقاف الحركة\n`.اكس او` - لعبة XO بأزرار تفاعلية\n`.خمن رقم` / `.تخمين 7` - لعبة تخمين\n`.الغاء اللعبة` - إنهاء اللعبة\n`.يوت اسم المقطع` - البحث في يوتيوب"
 
 print("🖤 BLACK HEART full command expansion loaded")
