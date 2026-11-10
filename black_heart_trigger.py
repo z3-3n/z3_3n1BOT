@@ -3,7 +3,7 @@ import re
 from telethon import events
 from black_heart import tg, is_bot_account
 
-_TRIGGER = re.compile(r"(?<![\\u0600-\\u06FF])اسود(?![\\u0600-\\u06FF])")
+_TRIGGER = re.compile(r"(?<![ء-ي])اسود(?![ء-ي])")
 
 
 @tg.on(events.NewMessage(incoming=True))
