@@ -67,7 +67,9 @@ async def developer_command_bridge(event):
     if not sender_id or sender_id not in developers:
         return
     text = (event.raw_text or "").strip()
-    if not text.startswith(".") or text in {".رفع مطور", ".حذف مطور", ".المطورين"}:
+    # Treat a lone dot or punctuation such as ".." as ordinary conversation.
+    # Only bridge actual dot-commands that begin with a command character.
+    if not (len(text) > 1 and text.startswith(".") and text[1].isalnum()) or text in {".رفع مطور", ".حذف مطور", ".المطورين"}:
         return
     try:
         sender = await event.get_sender()
@@ -88,7 +90,6 @@ async def developer_command_bridge(event):
             settings["ai_paused_chats"] = sorted(paused)
             save_json("settings.json", settings)
             await tg.send_message(event.chat_id, answer)
-            await event.delete()
             return
 
         if text in {".ايقاف الذكاء للكل", ".تشغيل الذكاء للكل"}:
@@ -98,7 +99,6 @@ async def developer_command_bridge(event):
             save_json("settings.json", settings)
             answer = "✅ تم تشغيل الذكاء للجميع." if enabled else "🛑 تم إيقاف الذكاء للجميع."
             await tg.send_message(event.chat_id, answer)
-            await event.delete()
             return
 
         # Preserve the reply target for other existing outgoing commands.
@@ -106,7 +106,8 @@ async def developer_command_bridge(event):
         if event.is_reply:
             replied = await event.get_reply_message()
             reply_to = replied.id if replied else None
+        # Keep the developer's original incoming message visible.
+        # Send a separate outgoing copy so existing outgoing command handlers still run.
         await tg.send_message(event.chat_id, text, reply_to=reply_to)
-        await event.delete()
     except Exception as exc:
         print("DEVELOPER COMMAND BRIDGE ERROR:", exc)
