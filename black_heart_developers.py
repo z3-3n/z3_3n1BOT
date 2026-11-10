@@ -5,7 +5,7 @@ or groups. Their incoming command is re-sent by the userbot so the existing
 outgoing command handlers execute without rewriting the whole command system.
 """
 from telethon import events
-from black_heart import tg, is_bot_account, load_json, save_json
+from black_heart import tg, is_bot_account, load_json, save_json, settings
 
 DEVELOPERS_FILE = "developers.json"
 developers = load_json(DEVELOPERS_FILE, [])
@@ -73,8 +73,35 @@ async def developer_command_bridge(event):
         sender = await event.get_sender()
         if not sender or is_bot_account(sender):
             return
-        # Preserve the reply target so commands such as moderation commands
-        # continue to work when issued by a developer.
+
+        # Handle AI switches directly. Messages sent by this same userbot
+        # through send_message are not guaranteed to produce a local
+        # outgoing NewMessage event, so forwarding the text alone is unsafe.
+        if text in {".ايقاف ذكي هنا", ".تشغيل ذكي هنا"}:
+            paused = {str(x) for x in settings.get("ai_paused_chats", [])}
+            if text == ".ايقاف ذكي هنا":
+                paused.add(str(event.chat_id))
+                answer = "🛑 تم إيقاف الذكاء الاصطناعي في هذه المحادثة."
+            else:
+                paused.discard(str(event.chat_id))
+                answer = "✅ تم تشغيل الذكاء الاصطناعي في هذه المحادثة."
+            settings["ai_paused_chats"] = sorted(paused)
+            save_json("settings.json", settings)
+            await tg.send_message(event.chat_id, answer)
+            await event.delete()
+            return
+
+        if text in {".ايقاف الذكاء للكل", ".تشغيل الذكاء للكل"}:
+            enabled = text == ".تشغيل الذكاء للكل"
+            settings["ai_global_enabled"] = enabled
+            settings["ai"] = enabled
+            save_json("settings.json", settings)
+            answer = "✅ تم تشغيل الذكاء للجميع." if enabled else "🛑 تم إيقاف الذكاء للجميع."
+            await tg.send_message(event.chat_id, answer)
+            await event.delete()
+            return
+
+        # Preserve the reply target for other existing outgoing commands.
         reply_to = None
         if event.is_reply:
             replied = await event.get_reply_message()
