@@ -1930,12 +1930,26 @@ async def stop_animation(event):
 # ------------------------- Playable mini-games -------------------------
 
 
+XO_GAMES = {}
+
+
 def _xo_has_won(board, mark):
     wins = ((0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6))
     return any(all(board[i] == mark for i in line) for line in wins)
 
 
-def _xo_keyboard(chat_id, board):
+def _xo_empty(board):
+    return [i for i, value in enumerate(board) if value not in ("X", "O")]
+
+
+def _xo_text(board, status):
+    cells = [value if value in ("X", "O") else "·" for value in board]
+    return ("🎮 **BLACK HEART | XO**\n\n" + " | ".join(cells[:3]) +
+            "\n-----------\n" + " | ".join(cells[3:6]) +
+            "\n-----------\n" + " | ".join(cells[6:]) + "\n\n" + status)
+
+
+def _xo_keyboard(game_id, board):
     rows = []
     for row in range(3):
         buttons = []
@@ -1943,60 +1957,183 @@ def _xo_keyboard(chat_id, board):
             index = row * 3 + col
             value = board[index]
             label = value if value in ("X", "O") else "□"
-            buttons.append(Button.inline(label, data=f"bhxo:{chat_id}:{index}".encode()))
+            buttons.append(Button.inline(label, data=f"bhxo:p:{game_id}:{index}".encode()))
         rows.append(buttons)
     return rows
 
 
-def _xo_text(board, status):
-    return "🎮 **BLACK HEART | XO**\n\n" + " | ".join(board[:3]) + "\n-----------\n" + " | ".join(board[3:6]) + "\n-----------\n" + " | ".join(board[6:]) + "\n\n" + status
+def _xo_ai_move(board, ai_mark, human_mark):
+    empty = _xo_empty(board)
+    if not empty:
+        return None
+    for mark in (ai_mark, human_mark):
+        for pos in empty:
+            trial = board[:]
+            trial[pos] = mark
+            if _xo_has_won(trial, mark):
+                return pos
+    if 4 in empty:
+        return 4
+    corners = [i for i in (0, 2, 6, 8) if i in empty]
+    if corners:
+        return random.choice(corners)
+    return random.choice(empty)
+
+
+def _xo_result(board):
+    if _xo_has_won(board, "X"):
+        return "X"
+    if _xo_has_won(board, "O"):
+        return "O"
+    if not _xo_empty(board):
+        return "draw"
+    return None
 
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.اكس او$"))
 async def start_tic_tac_toe(event):
-    board = ["·"] * 9
-    GAME_STATE[str(event.chat_id)] = {"type": "xo", "board": board,
-        "owner": int(event.sender_id), "turn": "X", "finished": False}
-    await event.edit(_xo_text(board, "دورك الآن — اضغط أحد المربعات."),
-                     buttons=_xo_keyboard(event.chat_id, board))
+    game_id = str(random.randint(10000000, 99999999))
+    XO_GAMES[game_id] = {
+        "chat_id": int(event.chat_id), "owner": int(event.sender_id),
+        "mode": None, "board": ["·"] * 9, "finished": False
+    }
+    buttons = [[
+        Button.inline("🤖 ضد الذكاء", data=f"bhxo:m:{game_id}:ai".encode()),
+        Button.inline("👤 ضد شخص", data=f"bhxo:m:{game_id}:pvp".encode())
+    ]]
+    await event.edit("🎮 **BLACK HEART | XO**\nاختر طريقة اللعب:", buttons=buttons)
 
 
-@tg.on(events.CallbackQuery(pattern=rb"^bhxo:-?\d+:[0-8]$"))
+@tg.on(events.CallbackQuery(pattern=rb"^bhxo:"))
 async def tic_tac_toe_button(event):
     try:
-        _, chat_value, pos_value = event.data.decode("utf-8").split(":")
-        chat_id, pos = int(chat_value), int(pos_value)
-        state = GAME_STATE.get(str(chat_id))
-        if not state or state.get("type") != "xo" or state.get("finished"):
+        parts = event.data.decode("utf-8").split(":")
+        if len(parts) < 4:
+            return await event.answer("زر غير صالح.", alert=True)
+        action = parts[1]
+        game_id = parts[2]
+        state = XO_GAMES.get(game_id)
+        if not state or state.get("finished"):
             return await event.answer("انتهت اللعبة أو لم تعد موجودة.", alert=True)
-        if int(event.sender_id or 0) != int(state["owner"]):
-            return await event.answer("هذه اللعبة ليست لك.", alert=True)
-        board = state["board"]
-        if state.get("turn") != "X":
-            return await event.answer("انتظر دورك.")
-        if board[pos] in ("X", "O"):
-            return await event.answer("هذه الخانة محجوزة؛ اختر غيرها.", alert=True)
-        board[pos] = "X"
-        if _xo_has_won(board, "X"):
-            await tg.edit_message(chat_id, event.query.msg_id, _xo_text(board, "🎉 فزت! انتهت اللعبة."), buttons=None)
-            GAME_STATE.pop(str(chat_id), None)
-            return await event.answer("مبروك الفوز!")
-        empty = [i for i, value in enumerate(board) if value not in ("X", "O")]
-        if empty:
-            choice = 4 if 4 in empty else random.choice(empty)
-            board[choice] = "O"
-        if _xo_has_won(board, "O"):
-            await tg.edit_message(chat_id, event.query.msg_id, _xo_text(board, "🤖 فاز الخصم هذه المرة."), buttons=None)
-            GAME_STATE.pop(str(chat_id), None)
-            return await event.answer("انتهت اللعبة.")
-        if not any(value not in ("X", "O") for value in board):
-            await tg.edit_message(chat_id, event.query.msg_id, _xo_text(board, "🤝 تعادل!"), buttons=None)
-            GAME_STATE.pop(str(chat_id), None)
-            return await event.answer("تعادل!")
-        await tg.edit_message(chat_id, event.query.msg_id,
-            _xo_text(board, "دورك الآن — اضغط مربعاً فارغاً."),
-            buttons=_xo_keyboard(chat_id, board))
-        await event.answer("تم تسجيل حركتك.")
+        chat_id = int(state["chat_id"])
+        message_id = event.query.msg_id
+        sender = int(event.sender_id or 0)
+
+        if action == "m":
+            if sender != state["owner"] or state.get("mode") is not None:
+                return await event.answer("صاحب اللعبة فقط يختار النمط.", alert=True)
+            mode = parts[3]
+            if mode not in ("ai", "pvp"):
+                return await event.answer("اختيار غير صالح.", alert=True)
+            state["mode"] = mode
+            buttons = [[
+                Button.inline("❌ ألعب X", data=f"bhxo:s:{game_id}:X".encode()),
+                Button.inline("⭕ ألعب O", data=f"bhxo:s:{game_id}:O".encode())
+            ]]
+            return await tg.edit_message(chat_id, message_id,
+                "اختر الرمز الذي تريد اللعب به:", buttons=buttons)
+
+        if action == "s":
+            if sender != state["owner"] or state.get("player_mark") is not None:
+                return await event.answer("صاحب اللعبة فقط يختار الرمز.", alert=True)
+            mark = parts[3]
+            if mark not in ("X", "O"):
+                return await event.answer("اختيار غير صالح.", alert=True)
+            state["player_mark"] = mark
+            state["board"] = ["·"] * 9
+            if state["mode"] == "pvp":
+                state["players"] = {mark: state["owner"]}
+                state["turn"] = "X"
+                join = Button.inline("انضم للعبة", data=f"bhxo:j:{game_id}:join".encode())
+                return await tg.edit_message(chat_id, message_id,
+                    f"👤 لعبة ضد شخص\nصاحب اللعبة اختار {mark}.\nلاعب آخر يضغط للانضمام؛ الرمز المتبقي له.",
+                    buttons=[[join]])
+            state["ai_mark"] = "O" if mark == "X" else "X"
+            state["turn"] = "X"
+            if state["ai_mark"] == "X":
+                pos = _xo_ai_move(state["board"], state["ai_mark"], mark)
+                state["board"][pos] = state["ai_mark"]
+                state["turn"] = mark
+            status = "دورك الآن — اضغط خانة." if state["turn"] == mark else "دور الذكاء الاصطناعي."
+            result = _xo_result(state["board"])
+            if result:
+                state["finished"] = True
+                status = "🤝 تعادل!" if result == "draw" else ("🤖 فاز الذكاء الاصطناعي." if result == state["ai_mark"] else "🎉 فزت!")
+                return await tg.edit_message(chat_id, message_id, _xo_text(state["board"], status), buttons=None)
+            return await tg.edit_message(chat_id, message_id, _xo_text(state["board"], status),
+                buttons=_xo_keyboard(game_id, state["board"]))
+
+        if action == "j":
+            if state.get("mode") != "pvp" or state.get("turn") is None or "player_mark" not in state:
+                return await event.answer("اللعبة غير جاهزة للانضمام.", alert=True)
+            if sender == state["owner"]:
+                return await event.answer("لا يمكنك الانضمام إلى لعبتك بنفسك.", alert=True)
+            if state.get("players", {}).get("X") or state.get("players", {}).get("O"):
+                if len(state.get("players", {})) >= 2:
+                    return await event.answer("انضم لاعب بالفعل.", alert=True)
+            other_mark = "O" if state["player_mark"] == "X" else "X"
+            state.setdefault("players", {})[other_mark] = sender
+            state["turn"] = "X"
+            status = "دور اللاعب X — اضغط خانة." if state["turn"] == "X" else "دور اللاعب O."
+            return await tg.edit_message(chat_id, message_id, _xo_text(state["board"], status),
+                buttons=_xo_keyboard(game_id, state["board"]))
+
+        if action == "p":
+            if state.get("mode") not in ("ai", "pvp") or state.get("player_mark") not in ("X", "O"):
+                return await event.answer("اللعبة لم تبدأ بعد.", alert=True)
+            try:
+                pos = int(parts[3])
+            except (ValueError, IndexError):
+                return await event.answer("خانة غير صالحة.", alert=True)
+            if pos < 0 or pos > 8:
+                return await event.answer("خانة غير صالحة.", alert=True)
+            mark = state.get("turn")
+            if state["mode"] == "ai":
+                if sender != state["owner"]:
+                    return await event.answer("هذه اللعبة ليست لك.", alert=True)
+                if mark != state["player_mark"]:
+                    return await event.answer("انتظر دور الذكاء الاصطناعي.", alert=True)
+            else:
+                players = state.get("players", {})
+                if len(players) != 2:
+                    return await event.answer("بانتظار لاعب آخر ينضم.", alert=True)
+                if players.get(mark) != sender:
+                    return await event.answer("ليس دورك الآن.", alert=True)
+            board = state["board"]
+            if board[pos] in ("X", "O"):
+                return await event.answer("هذه الخانة محجوزة؛ اختر غيرها.", alert=True)
+            board[pos] = mark
+            result = _xo_result(board)
+            if result:
+                state["finished"] = True
+                if result == "draw":
+                    status = "🤝 تعادل!"
+                elif state["mode"] == "ai":
+                    status = "🎉 فزت!" if result == state["player_mark"] else "🤖 فاز الذكاء الاصطناعي."
+                else:
+                    status = f"🏆 فاز اللاعب {result}!"
+                await tg.edit_message(chat_id, message_id, _xo_text(board, status), buttons=None)
+                return await event.answer(status)
+            state["turn"] = "O" if mark == "X" else "X"
+            if state["mode"] == "ai":
+                ai_mark = state["ai_mark"]
+                ai_pos = _xo_ai_move(board, ai_mark, state["player_mark"])
+                if ai_pos is not None:
+                    board[ai_pos] = ai_mark
+                result = _xo_result(board)
+                if result:
+                    state["finished"] = True
+                    status = "🤝 تعادل!" if result == "draw" else ("🎉 فزت!" if result == state["player_mark"] else "🤖 فاز الذكاء الاصطناعي.")
+                    await tg.edit_message(chat_id, message_id, _xo_text(board, status), buttons=None)
+                    return await event.answer(status)
+                state["turn"] = state["player_mark"]
+                status = "دورك الآن — اضغط خانة."
+            else:
+                status = f"دور اللاعب {state['turn']} — اضغط خانة."
+            await tg.edit_message(chat_id, message_id, _xo_text(board, status),
+                buttons=_xo_keyboard(game_id, board))
+            return await event.answer("تم تسجيل الحركة.")
+        return await event.answer("إجراء غير معروف.", alert=True)
     except Exception as exc:
         print("XO CALLBACK ERROR:", exc)
         try:
