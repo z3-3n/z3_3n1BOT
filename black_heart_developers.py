@@ -1,9 +1,9 @@
 """Persistent developer access for BLACK HEART.
 
-Authorized developers can issue existing dot-commands from either private chats
-or groups. Their incoming command is re-sent by the userbot so the existing
-outgoing command handlers execute without rewriting the whole command system.
+Developer commands are dispatched through the existing outgoing command handlers.
+This preserves the original command implementation and its reply/edit behavior.
 """
+import inspect
 from telethon import events
 from black_heart import tg, is_bot_account, load_json, save_json, settings
 
@@ -16,7 +16,33 @@ def _save_developers():
     save_json(DEVELOPERS_FILE, sorted(developers))
 
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.رفع مطور$"))
+async def _dispatch_existing_command(sent_message):
+    """Run the matching registered outgoing NewMessage handlers for a sent copy."""
+    synthetic_event = events.NewMessage.Event(sent_message)
+    synthetic_event._set_client(tg)
+
+    matched = 0
+    for callback, builder in tg.list_event_handlers():
+        if not isinstance(builder, events.NewMessage) or not builder.outgoing:
+            continue
+        try:
+            accepted = builder.filter(synthetic_event)
+            if inspect.isawaitable(accepted):
+                accepted = await accepted
+            if not accepted:
+                continue
+
+            matched += 1
+            await callback(synthetic_event)
+        except events.StopPropagation:
+            break
+        except Exception as exc:
+            print("DEVELOPER COMMAND HANDLER ERROR:", getattr(callback, "__name__", repr(callback)), exc)
+
+    return matched
+
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.رفع مطور$"))
 async def promote_developer(event):
     if not event.is_reply:
         return await event.edit("❌ رد على رسالة الشخص ثم أرسل: .رفع مطور")
@@ -31,7 +57,7 @@ async def promote_developer(event):
     await event.edit(f"🖤 تم رفع {getattr(user, 'first_name', None) or 'المستخدم'} إلى مطور. يستطيع الآن تنفيذ أوامر BLACK HEART من الخاص أو المجموعات.")
 
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.حذف مطور$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.حذف مطور$"))
 async def demote_developer(event):
     if not event.is_reply:
         return await event.edit("❌ رد على رسالة المطور ثم أرسل: .حذف مطور")
@@ -46,7 +72,7 @@ async def demote_developer(event):
     await event.edit("✅ تم سحب صلاحية المطور.")
 
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.المطورين$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.المطورين$"))
 async def list_developers(event):
     if not developers:
         return await event.edit("لا يوجد مطورون إضافيون حالياً.")
@@ -58,7 +84,7 @@ async def list_developers(event):
             lines.append(f"• {name} — {user_id}")
         except Exception:
             lines.append(f"• {user_id}")
-    await event.edit("🖤 **مطورو BLACK HEART**\n" + "\n".join(lines))
+    await event.edit("🖤 **مطورو BLACK HEART**\\n" + "\\n".join(lines))
 
 
 @tg.on(events.NewMessage(incoming=True))
@@ -66,19 +92,19 @@ async def developer_command_bridge(event):
     sender_id = str(event.sender_id or "")
     if not sender_id or sender_id not in developers:
         return
+
     text = (event.raw_text or "").strip()
-    # Treat a lone dot or punctuation such as ".." as ordinary conversation.
-    # Only bridge actual dot-commands that begin with a command character.
-    if not (len(text) > 1 and text.startswith(".") and text[1].isalnum()) or text in {".رفع مطور", ".حذف مطور", ".المطورين"}:
+    if not (len(text) > 1 and text.startswith(".") and text[1].isalnum()):
         return
+    if text in {".رفع مطور", ".حذف مطور", ".المطورين"}:
+        return
+
     try:
         sender = await event.get_sender()
         if not sender or is_bot_account(sender):
             return
 
-        # Handle AI switches directly. Messages sent by this same userbot
-        # through send_message are not guaranteed to produce a local
-        # outgoing NewMessage event, so forwarding the text alone is unsafe.
+        # These controls are handled directly because they update shared AI state.
         if text in {".ايقاف ذكي هنا", ".تشغيل ذكي هنا"}:
             paused = {str(x) for x in settings.get("ai_paused_chats", [])}
             if text == ".ايقاف ذكي هنا":
@@ -101,13 +127,18 @@ async def developer_command_bridge(event):
             await tg.send_message(event.chat_id, answer)
             return
 
-        # Preserve the reply target for other existing outgoing commands.
         reply_to = None
         if event.is_reply:
             replied = await event.get_reply_message()
             reply_to = replied.id if replied else None
-        # Keep the developer's original incoming message visible.
-        # Send a separate outgoing copy so existing outgoing command handlers still run.
-        await tg.send_message(event.chat_id, text, reply_to=reply_to)
+
+        # Create the outgoing command message, then explicitly dispatch it.
+        # send_message() does not consistently emit a local NewMessage update
+        # for the same account, so relying on outgoing=True alone can leave
+        # the copied command visible without executing its handler.
+        sent = await tg.send_message(event.chat_id, text, reply_to=reply_to)
+        matched = await _dispatch_existing_command(sent)
+        if not matched:
+            await sent.edit("⚠️ لم أجد معالجاً لهذا الأمر في النسخة الحالية.")
     except Exception as exc:
         print("DEVELOPER COMMAND BRIDGE ERROR:", exc)
