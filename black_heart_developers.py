@@ -42,7 +42,7 @@ async def _dispatch_existing_command(sent_message):
     return matched
 
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.رفع مطور$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.رفع مطور$"))
 async def promote_developer(event):
     if not event.is_reply:
         return await event.edit("❌ رد على رسالة الشخص ثم أرسل: .رفع مطور")
@@ -57,7 +57,7 @@ async def promote_developer(event):
     await event.edit(f"🖤 تم رفع {getattr(user, 'first_name', None) or 'المستخدم'} إلى مطور. يستطيع الآن تنفيذ أوامر BLACK HEART من الخاص أو المجموعات.")
 
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.حذف مطور$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.حذف مطور$"))
 async def demote_developer(event):
     if not event.is_reply:
         return await event.edit("❌ رد على رسالة المطور ثم أرسل: .حذف مطور")
@@ -72,7 +72,7 @@ async def demote_developer(event):
     await event.edit("✅ تم سحب صلاحية المطور.")
 
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.المطورين$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.المطورين$"))
 async def list_developers(event):
     if not developers:
         return await event.edit("لا يوجد مطورون إضافيون حالياً.")
@@ -84,7 +84,7 @@ async def list_developers(event):
             lines.append(f"• {name} — {user_id}")
         except Exception:
             lines.append(f"• {user_id}")
-    await event.edit("🖤 **مطورو BLACK HEART**\\n" + "\\n".join(lines))
+    await event.edit("🖤 **مطورو BLACK HEART**\n" + "\n".join(lines))
 
 
 @tg.on(events.NewMessage(incoming=True))
@@ -132,10 +132,7 @@ async def developer_command_bridge(event):
             replied = await event.get_reply_message()
             reply_to = replied.id if replied else None
 
-        # Create the outgoing command message, then explicitly dispatch it.
-        # send_message() does not consistently emit a local NewMessage update
-        # for the same account, so relying on outgoing=True alone can leave
-        # the copied command visible without executing its handler.
+        # Explicitly dispatch because send_message may not emit a local update.
         sent = await tg.send_message(event.chat_id, text, reply_to=reply_to)
         matched = await _dispatch_existing_command(sent)
         if not matched:
