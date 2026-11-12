@@ -295,7 +295,7 @@ MENU_PAGES = {
   8: "🖼 **الوسائط**\n`.معلومات الوسائط` بالرد على صورة أو ملف - عرض معلوماته\n`.حفظ الوسائط` بالرد - إعادة إرسال الوسيط في المحادثة\nلا يقوم السورس بتنزيل محتوى من مواقع خارجية.",
   9: "📁 **أدوات الوسائط**\n`.معلومات الوسائط` بالرد على ملف أو صورة\n`.حفظ الوسائط` بالرد لإعادة إرسال الملف\nلا توجد أوامر تحميل من روابط خارجية في هذه النسخة.",
  10: "🤖 **الذكاء الاصطناعي**\n`.تشغيل ذكي` / `.ايقاف ذكي`\n`.تفعيل القصف` / `.تعطيل القصف` (مزاح خفيف)\n`.النموذج` - عرض النماذج الاحتياطية\nيرد في الخاص، وفي المجموعات عند منشن الحساب فقط.",
- 11: "💬 **الردود التلقائية**\n`.اضافة رد الكلمة | الرد`\n`.حذف رد الكلمة`\n`.الردود` - عرض الردود المحفوظة\nتعمل عند تطابق رسالة واردة مع الكلمة تماماً.",
+ 11: "💬 **الردود التلقائية**\n`.اضافة رد الكلمة | الرد`\n`.اضف رد` - تطابق الرسالة وحدها\n`.اضف رد مميز` - الكلمة داخل الرسالة\n`.حذف رد الكلمة` / `.الردود` - إدارة الردود المحفوظة",
  12: "📣 **النشر والجدولة**\n`.نشر النص` - إرسال نص في المحادثة الحالية\n`.جدولة 10 النص` - إرسال النص بعد 10 دقائق (يمكن تغيير الرقم)\nاستخدمها باعتدال وفي المحادثات التي تملك حق النشر فيها.",
  13: "🧮 **الأدوات**\n`.وقت` - الوقت الحالي\n`.تاريخ` - التاريخ الحالي\n`.رابط الرسالة` بالرد - رابط الرسالة إذا كانت المجموعة عامة أو الرابط متاحاً",
  14: "⚙️ **حالة السورس**\n`.حالة` - حالة الاتصال والذكاء\n`.احصائيات` - عدد الرسائل المرصودة في هذه النسخة\nالإحصائيات تبدأ من وقت تشغيل هذه النسخة ولا تسترجع التاريخ السابق.",
@@ -904,12 +904,27 @@ async def incoming_handler(event):
                 print("ANTI LINK PERMISSION CHECK ERROR:", exc)
 
     incoming_text = (event.raw_text or "").strip()
-    if settings.get("auto_replies", True) and incoming_text and incoming_text.lower() in auto_replies:
-        try:
-            await event.reply(auto_replies[incoming_text.lower()])
-            return
-        except Exception as exc:
-            print("AUTO REPLY ERROR:", exc)
+    if settings.get("auto_replies", True) and incoming_text:
+        normalized = incoming_text.casefold().strip()
+        exact = auto_replies.get(normalized)
+        if exact:
+            try:
+                if isinstance(exact, dict):
+                    if exact.get("mode", "exact") == "exact":
+                        await event.reply(exact.get("answer", ""))
+                        return
+                else:
+                    await event.reply(exact)
+                    return
+            except Exception as exc:
+                print("AUTO REPLY EXACT ERROR:", exc)
+        for saved_trigger, saved_value in list(auto_replies.items()):
+            if isinstance(saved_value, dict) and saved_value.get("mode") == "contains" and saved_trigger.casefold() in normalized:
+                try:
+                    await event.reply(saved_value.get("answer", ""))
+                    return
+                except Exception as exc:
+                    print("AUTO REPLY CONTAINS ERROR:", exc)
 
     # Developer dot-commands are handled by the dedicated command bridge;
     # do not send an unrelated AI reply to those commands.
@@ -1672,10 +1687,17 @@ async def ai_resume_everywhere(event):
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.اضف رد$"))
 async def begin_interactive_auto_reply(event):
     key = (str(event.chat_id), str(event.sender_id))
-    PENDING_AUTO_REPLY[key] = {"step": "trigger", "started": time.monotonic()}
-    await event.edit("💬 أرسل الآن الكلمة أو العبارة التي تريد وضع رد لها.\nللإلغاء اكتب: `.الغاء اضافة رد`")
+    PENDING_AUTO_REPLY[key] = {"step": "trigger", "mode": "exact", "started": time.monotonic()}
+    await event.edit("💬 أرسل الكلمة أو العبارة. سيرد فقط إذا كانت الرسالة مطابقة لها وحدها.\nللإلغاء: `.الغاء اضافة رد`")
 
 
+
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.اضف رد مميز$"))
+async def begin_interactive_special_auto_reply(event):
+    key = (str(event.chat_id), str(event.sender_id))
+    PENDING_AUTO_REPLY[key] = {"step": "trigger", "mode": "contains", "started": time.monotonic()}
+    await event.edit("💬 أرسل الكلمة التي تريد مراقبتها. سيرد إذا ظهرت داخل أي رسالة حتى لو معها كلام آخر.\nللإلغاء: `.الغاء اضافة رد`")
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.الغاء اضافة رد$"))
 async def cancel_interactive_auto_reply(event):
     key = (str(event.chat_id), str(event.sender_id))
@@ -1705,10 +1727,12 @@ async def interactive_auto_reply_steps(event):
     if not trigger:
         PENDING_AUTO_REPLY.pop(key, None)
         return await event.edit("تعذر حفظ الرد؛ ابدأ من جديد بالأمر `.اضف رد`.")
-    auto_replies[trigger.lower()] = raw[:1500]
+    mode = state.get("mode", "exact")
+    auto_replies[trigger.casefold()] = {"mode": mode, "answer": raw[:1500]}
     save_json(AUTO_REPLIES_FILE, auto_replies)
     PENDING_AUTO_REPLY.pop(key, None)
-    await event.edit(f"🖤 تم حفظ الرد بنجاح للكلمة: {trigger}")
+    mode_label = "مطابقة الرسالة وحدها" if mode == "exact" else "وجود الكلمة داخل الرسالة"
+    await event.edit(f"🖤 تم حفظ الرد للكلمة: {trigger}\nطريقة التشغيل: {mode_label}")
 
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.تعديل رد\s+(.+)$"))
