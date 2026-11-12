@@ -288,7 +288,7 @@ MENU_PAGES = {
   1: "🛡 **الإدارة**\n`.حظر` / `.الغاء حظر` بالرد\n`.كتم` / `.الغاء كتم` بالرد\n`.طرد` بالرد\n`.تثبيت` / `.الغاء تثبيت` بالرد\n`.مسح` بالرد\n`.بلوك` / `.الغاء بلوك` بالرد في الخاص\n`.كتم خاص` / `.الغاء كتم خاص` بالرد في الخاص",
   2: "🧰 **الحماية**\n`.تفعيل حماية` - حذف الرسائل التي تحتوي روابط في المجموعة\n`.تعطيل حماية` - إيقاف حذف الروابط\n`.حالة حماية` - عرض الحالة\nتحتاج صلاحية مشرف، كما يحتاج الحساب صلاحية حذف الرسائل.",
   3: "👥 **المجموعة**\n`.معلومات المجموعة` - معلومات المجموعة الحالية\n`.عدد الاعضاء` - عدد الأعضاء\n`.رابط المجموعة` - إنشاء رابط دعوة إذا كانت الصلاحية متاحة",
-  4: "👤 **الحساب**\n`.معلوماتي` - معلومات حسابك\n`.بحث يوزر ثلاثي` - فحص 30 احتمالاً\n`.بحث يوزر رباعي` - فحص 30 احتمالاً\n`.تغيير الاسم الاسم الجديد` - تغيير اسم الحساب\n`.تغيير البايو النص` - تغيير النبذة\nالبحث لا يغيّر يوزرك الحالي.",
+ 4: "👤 **الحساب**\\n`.معلوماتي` - معلومات حسابك\\n`.تغيير الاسم الاسم الجديد` - تغيير اسم الحساب\\n`.تغيير البايو النص` - تغيير النبذة",
   5: "🔎 **المعلومات والمنشن**\n`.ايدي` أو `.ا` - معلوماتك أو معلومات صاحب الرسالة التي ترد عليها\n`.منشن` - منشن صاحب الرسالة التي ترد عليها فقط",
   6: "✍️ **التنسيق**\n`.عريض النص` - نص عريض\n`.مائل النص` - نص مائل\n`.كود النص` - نص بتنسيق كود\n`.شطب النص` - نص مشطوب",
   7: "🌐 **الترجمة**\n`.ترجم النص` - ترجمة النص إلى العربية\n`.ترجم انجليزي النص` - ترجمة النص إلى الإنجليزية\nتحتاج مفتاح GROQ_API_KEY.",
@@ -641,28 +641,37 @@ async def group_link(event):
         await event.edit(f"🔗 رابط الدعوة:\n{link}")
     except Exception as exc: await event.edit(f"تعذر إنشاء الرابط. تأكد من صلاحيات الدعوة.\n`{exc}`")
 
-# Username availability search; this never changes the account username.
+# Sequential, persistent username availability search; never changes the account username.
 async def _username_search(event, length):
-    import random
     from telethon import functions
     me = await tg.get_me()
     original_username = getattr(me, "username", None)
     if not original_username:
         return await event.edit("⚠️ حسابك لا يملك يوزراً حالياً. لن يتم تغيير أي إعداد.")
-    await event.edit("🔎 أجهّز 30 احتمالاً بطول " + str(length) + ". يوزرك الحالي محفوظ: @" + original_username)
     alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
-    candidates = set()
-    attempts = 0
-    while len(candidates) < 30 and attempts < 3000:
-        attempts += 1
-        # Three/four alphanumeric parts separated by underscores (Telegram-valid length).
-        parts = [random.choice(alphabet) for _ in range(length)]
-        username = "_".join(parts)
-        if username.lower() != original_username.lower():
-            candidates.add(username)
+    state_file = "username_search_state.json"
+    state = load_json(state_file, {})
+    key = str(length)
+    cursor = int(state.get(key, 0) or 0)
+    total = len(alphabet) ** length
+    await event.edit("🔎 البحث المتسلسل بدأ من الاحتمال رقم " + str(cursor + 1) + ". سأفحص 30 احتمالاً بالترتيب دون تكرار، ويوزرك محفوظ: @" + original_username)
+
+    def make_username(number):
+        parts = []
+        for _ in range(length):
+            number, digit = divmod(number, len(alphabet))
+            parts.append(alphabet[digit])
+        return "_".join(parts)
+
     available = []
     checked = 0
-    for username in candidates:
+    while checked < 30 and cursor < total:
+        username = make_username(cursor)
+        cursor += 1
+        state[key] = cursor
+        save_json(state_file, state)
+        if username.lower() == original_username.lower():
+            continue
         try:
             result = await tg(functions.account.CheckUsernameRequest(username=username))
             checked += 1
@@ -676,19 +685,28 @@ async def _username_search(event, length):
             if "FLOOD" in msg or "TOO_MANY" in msg:
                 break
             print("USERNAME SEARCH ERROR:", exc)
-    if available:
-        body = "\n".join("- " + item for item in available)
-        await event.edit("🖤 نتائج البحث (" + str(length) + " خانات)\nتم فحص: " + str(checked) + " من 30\nالمتاح وقت الفحص:\n" + body + "\n\nيوزرك الأصلي محفوظ كما هو: @" + original_username + "\nقد يتغير التوفر لاحقاً.")
-    else:
-        await event.edit("انتهى الفحص. تم فحص " + str(checked) + " من 30 ولم يظهر يوزر متاح.\nيوزرك لم يتغير: @" + original_username)
+            checked += 1
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.بحث يوزر ثلاثي$"))
+    lines = ["🖤 النتائج المتاحة وقت الفحص:"]
+    lines.extend("- " + item for item in available)
+    if not available:
+        lines.append("لم يظهر يوزر متاح في هذه الدفعة.")
+    lines.append("تم فحص: " + str(checked) + " احتمالاً.")
+    lines.append("يوزرك الأصلي محفوظ كما هو: @" + original_username)
+    if cursor >= total:
+        lines.append("✅ اكتمل تسلسل جميع الاحتمالات لهذا النوع.")
+    else:
+        lines.append("للمتابعة دون تكرار، أعد كتابة الأمر نفسه. التالي من رقم: " + str(cursor + 1))
+    await event.edit("\\n".join(lines))
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.بحث يوزر ثلاثي$"))
 async def search_three_char_username(event):
     await _username_search(event, 3)
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.بحث يوزر رباعي$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.بحث يوزر رباعي$"))
 async def search_four_char_username(event):
     await _username_search(event, 4)
+
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.معلوماتي$"))
 async def my_profile(event):
     me = await tg.get_me()
