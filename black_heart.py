@@ -740,7 +740,11 @@ async def remove_auto_reply(event):
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.الردود$"))
 async def list_auto_replies(event):
     if not auto_replies: return await event.edit("لا توجد ردود تلقائية محفوظة.")
-    rows = [f"• {k} ← {v[:80]}" for k, v in list(auto_replies.items())[:30]]
+    rows = []
+    for k, v in list(auto_replies.items())[:30]:
+        answer = v.get("answer", "") if isinstance(v, dict) else str(v)
+        mode = "مميز" if isinstance(v, dict) and v.get("mode") == "contains" else "مطابق"
+        rows.append(f"• {k} [{mode}] ← {answer[:80]}")
     await event.edit("💬 **الردود المحفوظة**\n" + "\n".join(rows))
 
 # ------------------------- Posting / scheduling -------------------------
