@@ -137,3 +137,35 @@ MENU_PAGES[15] += "\n`.ضحك` - حركة ضحك\n`.انتحال` بالرد / `
 MENU_PAGES[1] += "\n`.رفع مطور` بالرد - إضافة مطور\n`.حذف مطور` أو `.مسح مطور` بالرد - حذف مطور\n`.المطورين` - عرض قائمة المطورين"
 
 print("🖤 BLACK HEART profile, photo, art and fun extensions loaded")
+
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.صورة\\s+(\\d+)$"))
+async def blackheart_numbered_photo(event):
+    if not event.is_reply:
+        return await event.edit("↩️ رد على رسالة الشخص ثم أرسل: .صورة 1")
+    target = await _get_target(event)
+    if not target:
+        return await event.edit("❌ تعذّر تحديد الحساب.")
+    number = int(event.pattern_match.group(1))
+    if number < 1 or number > 100:
+        return await event.edit("❌ اختر رقماً من 1 إلى 100.")
+    try:
+        photos = await tg.get_profile_photos(target, limit=100)
+        if number > len(photos):
+            return await event.edit(f"❌ هذا الحساب لديه {len(photos)} صورة متاحة فقط.")
+        photo = photos[number - 1]
+        data = await tg.download_media(photo, file=bytes)
+        if not data:
+            return await event.edit("❌ تعذّر تحميل الصورة المطلوبة.")
+        await tg.send_file(
+            event.chat_id,
+            data,
+            caption=f"🖤 الصورة رقم {number} — {clean_text(display_name(target))}",
+            reply_to=event.reply_to_msg_id,
+        )
+        await event.delete()
+    except Exception as exc:
+        print("NUMBERED PROFILE PHOTO ERROR:", exc)
+        await event.edit("❌ تعذّر جلب الصورة المطلوبة.")
+
+MENU_PAGES[4] += "\\n`.صورة رقم` بالرد - جلب صورة الملف الشخصي حسب ترتيبها (1 الأحدث)\\n"
