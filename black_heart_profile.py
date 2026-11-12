@@ -19,7 +19,7 @@ async def _get_target(event):
         return await msg.get_sender() if msg else None
     return await event.get_sender()
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.(?:كشف|ا)$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.(?:كشف|ا)$"))
 async def blackheart_profile_info(event):
     user = await _get_target(event)
     if not user:
@@ -56,14 +56,14 @@ async def _send_profile_photo(event, target):
         print("PROFILE PHOTO ERROR:", exc)
         await event.edit("❌ تعذّر جلب صورة الملف الشخصي.")
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.(?:اا|صورتي)$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.(?:اا|صورتي)$"))
 async def blackheart_my_photo(event):
     target = await _get_target(event)
     if not target:
         return await event.edit("❌ تعذّر تحديد الحساب.")
     await _send_profile_photo(event, target)
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.ضحك$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.ضحك$"))
 async def blackheart_laugh(event):
     frames = ["😂 🤣 😹 🤣 😂", "😹 😂 🤣 😂 😹", "🤣 😆 😂 😆 🤣", "😂 🖤 🤣 🖤 😹"]
     try:
@@ -75,7 +75,7 @@ async def blackheart_laugh(event):
     except Exception as exc:
         print("LAUGH ANIMATION ERROR:", exc)
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.تاك(?:\\s+(.+))?$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.تاك(?:\s+(.+))?$"))
 async def blackheart_announcement(event):
     # رسالة إعلان عادية دون منشن جماعي أو إزعاج جميع الأعضاء.
     message = (event.pattern_match.group(1) or "السلام عليكم").strip()
@@ -83,7 +83,7 @@ async def blackheart_announcement(event):
         return await event.edit("❌ الرسالة طويلة جداً؛ الحد 1000 حرف.")
     await event.edit("📢 " + message)
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.انتحال$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.انتحال$"))
 async def blackheart_impersonation_notice(event):
     await event.edit(
         "⚠️ أمر الانتحال الذي ينسخ هوية شخص آخر قد يضلّل أعضاء المجموعة. "
