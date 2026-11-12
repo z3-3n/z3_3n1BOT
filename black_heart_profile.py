@@ -19,7 +19,7 @@ async def _get_target(event):
         return await msg.get_sender() if msg else None
     return await event.get_sender()
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.(?:كشف|ا)$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.كشف$"))
 async def blackheart_profile_info(event):
     user = await _get_target(event)
     if not user:
