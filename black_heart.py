@@ -699,11 +699,11 @@ async def _username_search(event, length):
         lines.append("للمتابعة دون تكرار، أعد كتابة الأمر نفسه. التالي من رقم: " + str(cursor + 1))
     await event.edit("\\n".join(lines))
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.بحث يوزر ثلاثي$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.بحث يوزر ثلاثي$"))
 async def search_three_char_username(event):
     await _username_search(event, 3)
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.بحث يوزر رباعي$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.بحث يوزر رباعي$"))
 async def search_four_char_username(event):
     await _username_search(event, 4)
 
