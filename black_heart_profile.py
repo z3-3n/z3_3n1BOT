@@ -3,7 +3,7 @@ import asyncio
 from telethon import events
 
 # إضافات BLACK HEART - تُحمّل بعد black_heart.py
-from black_heart import tg, display_name, clean_text, user_bio, user_role, _bh_html, ASCII_ART
+from black_heart import tg, display_name, clean_text, user_bio, user_role, _bh_html, ASCII_ART, MENU_PAGES
 
 # رسومات ASCII ثابتة العرض؛ تجنب الإيموجي داخل الرسم لأنها تختلف في عرضها بين الأجهزة.
 ASCII_ART.update({
@@ -90,5 +90,9 @@ async def blackheart_impersonation_notice(event):
         "لن أغيّر اسمك أو صورتك لتقليد حساب شخص آخر. "
         "يمكنك استخدام .اا لعرض صورتك و.كشف لعرض بيانات الحساب."
     )
+
+MENU_PAGES[4] += "\\n`.كشف` أو `.ا` بالرد - كشف بيانات الحساب\\n`.اا` أو `.صورتي` - إرسال صورة الحساب، وبالرد صورة صاحب الرسالة\n"
+MENU_PAGES[5] += "\\n`.تاك نص` - إرسال إعلان نصي دون منشن جماعي\n"
+MENU_PAGES[15] += "\\n`.ضحك` - حركة ضحك\\n`.قلب` / `.شجرة` / `.سيارة` / `.فراشة` - رسومات محسّنة\n"
 
 print("🖤 BLACK HEART profile, photo, art and fun extensions loaded")
