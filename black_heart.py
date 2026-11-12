@@ -1639,6 +1639,7 @@ from urllib.parse import quote_plus as _bh_quote_plus
 AI_PAUSED_CHATS = set(str(x) for x in settings.get("ai_paused_chats", []))
 AI_GLOBAL_ENABLED = bool(settings.get("ai_global_enabled", settings.get("ai", True)))
 PENDING_AUTO_REPLY = {}
+PENDING_DELETE_AUTO_REPLY = {}
 FUN_HISTORY_FILE = "fun_history.json"
 fun_history = load_json(FUN_HISTORY_FILE, {})
 GAME_STATE = {}
@@ -1702,6 +1703,48 @@ async def begin_interactive_special_auto_reply(event):
     key = (str(event.chat_id), str(event.sender_id))
     PENDING_AUTO_REPLY[key] = {"step": "trigger", "mode": "contains", "started": time.monotonic()}
     await event.edit("💬 أرسل الكلمة التي تريد مراقبتها. سيرد إذا ظهرت داخل أي رسالة حتى لو معها كلام آخر.\nللإلغاء: `.الغاء اضافة رد`")
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.حذف رد$"))
+async def begin_delete_exact_auto_reply(event):
+    key = (str(event.chat_id), str(event.sender_id))
+    PENDING_DELETE_AUTO_REPLY[key] = {"mode": "exact", "started": time.monotonic()}
+    PENDING_AUTO_REPLY.pop(key, None)
+    await event.edit("🗑️ أرسل الكلمة أو العبارة المحفوظة التي تريد حذف ردّها.")
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.حذف رد مميز$"))
+async def begin_delete_special_auto_reply(event):
+    key = (str(event.chat_id), str(event.sender_id))
+    PENDING_DELETE_AUTO_REPLY[key] = {"mode": "contains", "started": time.monotonic()}
+    PENDING_AUTO_REPLY.pop(key, None)
+    await event.edit("🗑️ أرسل الكلمة المحفوظة في الرد المميز التي تريد حذفها.")
+
+@tg.on(events.NewMessage(outgoing=True))
+async def delete_auto_reply_step(event):
+    key = (str(event.chat_id), str(event.sender_id))
+    state = PENDING_DELETE_AUTO_REPLY.get(key)
+    if not state:
+        return
+    raw = (event.raw_text or "").strip()
+    if not raw or raw.startswith("."):
+        return
+    if time.monotonic() - state.get("started", 0) > 300:
+        PENDING_DELETE_AUTO_REPLY.pop(key, None)
+        return
+    trigger = raw.casefold()
+    saved = auto_replies.get(trigger)
+    wanted_mode = state.get("mode", "exact")
+    if saved is None:
+        PENDING_DELETE_AUTO_REPLY.pop(key, None)
+        return await event.edit("❌ لا يوجد رد محفوظ بهذه الكلمة.")
+    saved_mode = saved.get("mode", "exact") if isinstance(saved, dict) else "exact"
+    if saved_mode != wanted_mode:
+        PENDING_DELETE_AUTO_REPLY.pop(key, None)
+        return await event.edit("❌ الرد موجود، لكنه من النوع الآخر. استخدم أمر الحذف المطابق لنوعه.")
+    auto_replies.pop(trigger, None)
+    save_json(AUTO_REPLIES_FILE, auto_replies)
+    PENDING_DELETE_AUTO_REPLY.pop(key, None)
+    await event.edit("✅ تم حذف الرد المحفوظ.")
+
+
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.الغاء اضافة رد$"))
 async def cancel_interactive_auto_reply(event):
     key = (str(event.chat_id), str(event.sender_id))
