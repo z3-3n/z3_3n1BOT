@@ -1,9 +1,10 @@
 import html
 import asyncio
-from telethon import events
+import json
+from telethon import events, functions
 
 # إضافات BLACK HEART - تُحمّل بعد black_heart.py
-from black_heart import tg, display_name, clean_text, user_bio, user_role, _bh_html, ASCII_ART, MENU_PAGES
+from black_heart import tg, display_name, clean_text, user_bio, user_role, _bh_html, ASCII_ART, MENU_PAGES, data_file
 
 # رسومات ASCII ثابتة العرض؛ تجنب الإيموجي داخل الرسم لأنها تختلف في عرضها بين الأجهزة.
 ASCII_ART.update({
@@ -83,16 +84,54 @@ async def blackheart_announcement(event):
         return await event.edit("❌ الرسالة طويلة جداً؛ الحد 1000 حرف.")
     await event.edit("📢 " + message)
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.انتحال$"))
-async def blackheart_impersonation_notice(event):
-    await event.edit(
-        "⚠️ أمر الانتحال الذي ينسخ هوية شخص آخر قد يضلّل أعضاء المجموعة. "
-        "لن أغيّر اسمك أو صورتك لتقليد حساب شخص آخر. "
-        "يمكنك استخدام .اا لعرض صورتك و.كشف لعرض بيانات الحساب."
-    )
+IMPERSONATION_BACKUP = data_file("profile_restore.json")
 
-MENU_PAGES[4] += "\n`.كشف` أو `.ا` بالرد - كشف بيانات الحساب\n`.اا` أو `.صورتي` - إرسال صورة الحساب، وبالرد صورة صاحب الرسالة\n"
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.انتحال$"))
+async def blackheart_impersonate_demo(event):
+    if not event.is_reply:
+        return await event.edit("↩️ رد على حساب الشخص ثم أرسل .انتحال. للرجوع أرسل .اعادة.")
+    replied = await event.get_reply_message()
+    target = await replied.get_sender() if replied else None
+    if not target or not getattr(target, "id", None):
+        return await event.edit("❌ لم أستطع تحديد الحساب.")
+    me = await tg.get_me()
+    if me.id == target.id:
+        return await event.edit("هذا حسابك بالفعل.")
+    if IMPERSONATION_BACKUP.exists():
+        return await event.edit("⚠️ توجد محاكاة سابقة؛ استخدم .اعادة أولاً.")
+    backup = {"first_name": me.first_name or "", "last_name": me.last_name or "", "about": await user_bio(me)}
+    try:
+        with IMPERSONATION_BACKUP.open("w", encoding="utf-8") as fp:
+            json.dump(backup, fp, ensure_ascii=False)
+        await tg(functions.account.UpdateProfileRequest(
+            first_name=(getattr(target, "first_name", None) or " "),
+            last_name=(getattr(target, "last_name", None) or ""),
+            about=(await user_bio(target))[:70],
+        ))
+        await event.edit("🎭 تمت محاكاة الاسم والنبذة مؤقتاً للعرض. لم يتغير المعرف أو الصورة. أرسل .اعادة للرجوع.")
+    except Exception as exc:
+        IMPERSONATION_BACKUP.unlink(missing_ok=True)
+        await event.edit(f"❌ تعذّر تنفيذ المحاكاة: {exc}")
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.اعادة$"))
+async def blackheart_restore_profile(event):
+    if not IMPERSONATION_BACKUP.exists():
+        return await event.edit("ℹ️ لا توجد محاكاة محفوظة؛ حسابك على وضعه الأصلي.")
+    try:
+        with IMPERSONATION_BACKUP.open("r", encoding="utf-8") as fp:
+            backup = json.load(fp)
+        await tg(functions.account.UpdateProfileRequest(
+            first_name=backup.get("first_name") or " ",
+            last_name=backup.get("last_name") or "",
+            about=(backup.get("about") or "")[:70],
+        ))
+        IMPERSONATION_BACKUP.unlink(missing_ok=True)
+        await event.edit("✅ رجع اسم حسابك ونبذته كما كانا.")
+    except Exception as exc:
+        await event.edit(f"❌ تعذّرت الاستعادة: {exc}")
+
+MENU_PAGES[4] += "\n`.كشف` بالرد - كشف بيانات الحساب\n`.اا` أو `.صورتي` - إرسال صورة الحساب، وبالرد صورة صاحب الرسالة\n`.انتحال` بالرد - محاكاة الاسم والنبذة مؤقتاً\n`.اعادة` - استعادة الاسم والنبذة\n"
 MENU_PAGES[5] += "\n`.تاك نص` - إرسال إعلان نصي دون منشن جماعي\n"
-MENU_PAGES[15] += "\n`.ضحك` - حركة ضحك\n`.قلب` / `.شجرة` / `.سيارة` / `.فراشة` - رسومات محسّنة\n"
+MENU_PAGES[15] += "\n`.ضحك` - حركة ضحك\n`.انتحال` بالرد / `.اعادة` - محاكاة مؤقتة ثم استعادة الحساب\n`.قلب` / `.شجرة` / `.سيارة` / `.فراشة` - رسومات محسّنة\n"
 
 print("🖤 BLACK HEART profile, photo, art and fun extensions loaded")
