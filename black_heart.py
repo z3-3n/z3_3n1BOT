@@ -655,12 +655,9 @@ async def _username_search(event, length):
     attempts = 0
     while len(candidates) < 30 and attempts < 3000:
         attempts += 1
-        chars = [random.choice(alphabet) for _ in range(length)]
-        if random.random() < 0.8 and length > 1:
-            chars[1] = "_"
-        username = "".join(chars)
-        if username.startswith("_") or username.endswith("_") or "__" in username:
-            continue
+        # Three/four alphanumeric parts separated by underscores (Telegram-valid length).
+        parts = [random.choice(alphabet) for _ in range(length)]
+        username = "_".join(parts)
         if username.lower() != original_username.lower():
             candidates.add(username)
     available = []
