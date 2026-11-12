@@ -288,7 +288,7 @@ MENU_PAGES = {
   1: "🛡 **الإدارة**\n`.حظر` / `.الغاء حظر` بالرد\n`.كتم` / `.الغاء كتم` بالرد\n`.طرد` بالرد\n`.تثبيت` / `.الغاء تثبيت` بالرد\n`.مسح` بالرد\n`.بلوك` / `.الغاء بلوك` بالرد في الخاص\n`.كتم خاص` / `.الغاء كتم خاص` بالرد في الخاص",
   2: "🧰 **الحماية**\n`.تفعيل حماية` - حذف الرسائل التي تحتوي روابط في المجموعة\n`.تعطيل حماية` - إيقاف حذف الروابط\n`.حالة حماية` - عرض الحالة\nتحتاج صلاحية مشرف، كما يحتاج الحساب صلاحية حذف الرسائل.",
   3: "👥 **المجموعة**\n`.معلومات المجموعة` - معلومات المجموعة الحالية\n`.عدد الاعضاء` - عدد الأعضاء\n`.رابط المجموعة` - إنشاء رابط دعوة إذا كانت الصلاحية متاحة",
-  4: "👤 **الحساب**\n`.معلوماتي` - معلومات حسابك\n`.تغيير الاسم الاسم الجديد` - تغيير اسم الحساب\n`.تغيير البايو النص` - تغيير النبذة\nهذه الأوامر تعدّل حساب تيليجرام الذي يشغّل السورس.",
+  4: "👤 **الحساب**\n`.معلوماتي` - معلومات حسابك\n`.بحث يوزر ثلاثي` - فحص 30 احتمالاً\n`.بحث يوزر رباعي` - فحص 30 احتمالاً\n`.تغيير الاسم الاسم الجديد` - تغيير اسم الحساب\n`.تغيير البايو النص` - تغيير النبذة\nالبحث لا يغيّر يوزرك الحالي.",
   5: "🔎 **المعلومات والمنشن**\n`.ايدي` أو `.ا` - معلوماتك أو معلومات صاحب الرسالة التي ترد عليها\n`.منشن` - منشن صاحب الرسالة التي ترد عليها فقط",
   6: "✍️ **التنسيق**\n`.عريض النص` - نص عريض\n`.مائل النص` - نص مائل\n`.كود النص` - نص بتنسيق كود\n`.شطب النص` - نص مشطوب",
   7: "🌐 **الترجمة**\n`.ترجم النص` - ترجمة النص إلى العربية\n`.ترجم انجليزي النص` - ترجمة النص إلى الإنجليزية\nتحتاج مفتاح GROQ_API_KEY.",
@@ -641,6 +641,57 @@ async def group_link(event):
         await event.edit(f"🔗 رابط الدعوة:\n{link}")
     except Exception as exc: await event.edit(f"تعذر إنشاء الرابط. تأكد من صلاحيات الدعوة.\n`{exc}`")
 
+# Username availability search; this never changes the account username.
+async def _username_search(event, length):
+    import random
+    from telethon import functions
+    me = await tg.get_me()
+    original_username = getattr(me, "username", None)
+    if not original_username:
+        return await event.edit("⚠️ حسابك لا يملك يوزراً حالياً. لن يتم تغيير أي إعداد.")
+    await event.edit("🔎 أجهّز 30 احتمالاً بطول " + str(length) + ". يوزرك الحالي محفوظ: @" + original_username)
+    alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+    candidates = set()
+    attempts = 0
+    while len(candidates) < 30 and attempts < 3000:
+        attempts += 1
+        chars = [random.choice(alphabet) for _ in range(length)]
+        if random.random() < 0.8 and length > 1:
+            chars[1] = "_"
+        username = "".join(chars)
+        if username.startswith("_") or username.endswith("_") or "__" in username:
+            continue
+        if username.lower() != original_username.lower():
+            candidates.add(username)
+    available = []
+    checked = 0
+    for username in candidates:
+        try:
+            result = await tg(functions.account.CheckUsernameRequest(username=username))
+            checked += 1
+            if result:
+                available.append("@" + username)
+        except Exception as exc:
+            msg = str(exc).upper()
+            if "USERNAME_OCCUPIED" in msg or "USERNAME_INVALID" in msg:
+                checked += 1
+                continue
+            if "FLOOD" in msg or "TOO_MANY" in msg:
+                break
+            print("USERNAME SEARCH ERROR:", exc)
+    if available:
+        body = "\n".join("- " + item for item in available)
+        await event.edit("🖤 نتائج البحث (" + str(length) + " خانات)\nتم فحص: " + str(checked) + " من 30\nالمتاح وقت الفحص:\n" + body + "\n\nيوزرك الأصلي محفوظ كما هو: @" + original_username + "\nقد يتغير التوفر لاحقاً.")
+    else:
+        await event.edit("انتهى الفحص. تم فحص " + str(checked) + " من 30 ولم يظهر يوزر متاح.\nيوزرك لم يتغير: @" + original_username)
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.بحث يوزر ثلاثي$"))
+async def search_three_char_username(event):
+    await _username_search(event, 3)
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.بحث يوزر رباعي$"))
+async def search_four_char_username(event):
+    await _username_search(event, 4)
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.معلوماتي$"))
 async def my_profile(event):
     me = await tg.get_me()
