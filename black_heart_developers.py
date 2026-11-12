@@ -57,7 +57,7 @@ async def promote_developer(event):
     await event.edit(f"🖤 تم رفع {getattr(user, 'first_name', None) or 'المستخدم'} إلى مطور. يستطيع الآن تنفيذ أوامر BLACK HEART من الخاص أو المجموعات.")
 
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.حذف مطور$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.(?:حذف|مسح) مطور$"))
 async def demote_developer(event):
     if not event.is_reply:
         return await event.edit("❌ رد على رسالة المطور ثم أرسل: .حذف مطور")
@@ -96,7 +96,7 @@ async def developer_command_bridge(event):
     text = (event.raw_text or "").strip()
     if not (len(text) > 1 and text.startswith(".") and text[1].isalnum()):
         return
-    if text in {".رفع مطور", ".حذف مطور", ".المطورين"}:
+    if text in {".رفع مطور", ".حذف مطور", ".مسح مطور", ".المطورين"}:
         return
 
     try:
