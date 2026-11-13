@@ -1757,6 +1757,7 @@ async def ai_resume_this_chat(event):
 async def ai_pause_everywhere(event):
     global AI_GLOBAL_ENABLED
     AI_GLOBAL_ENABLED = False
+    settings["ai_enabled_chats"] = []
     _save_ai_state()
     await event.edit("🛑 تم إيقاف الذكاء الاصطناعي في جميع المحادثات. بقية الأوامر والألعاب مستمرة.")
 
@@ -1765,6 +1766,7 @@ async def ai_pause_everywhere(event):
 async def ai_resume_everywhere(event):
     global AI_GLOBAL_ENABLED
     AI_GLOBAL_ENABLED = True
+    settings["ai_enabled_chats"] = []
     _save_ai_state()
     await event.edit("✅ تم تشغيل الذكاء الاصطناعي في جميع المحادثات غير الموقوفة محلياً.")
 
