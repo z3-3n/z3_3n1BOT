@@ -5,6 +5,7 @@ This preserves the original command implementation and its reply/edit behavior.
 """
 import inspect
 from telethon import events
+import black_heart as bh
 from black_heart import tg, is_bot_account, load_json, save_json, settings
 
 DEVELOPERS_FILE = "developers.json"
@@ -31,7 +32,13 @@ async def _dispatch_existing_command(sent_message):
             # absent on messages created by send_message from the developer bridge.
             pattern = getattr(builder, "pattern", None)
             if pattern:
-                pattern_match = pattern(sent_message.raw_text or "")
+                raw_text = sent_message.raw_text or ""
+                if callable(pattern):
+                    pattern_match = pattern(raw_text)
+                elif hasattr(pattern, "match"):
+                    pattern_match = pattern.match(raw_text)
+                else:
+                    pattern_match = None
                 if not pattern_match:
                     continue
                 synthetic_event.pattern_match = pattern_match
@@ -137,6 +144,7 @@ async def developer_command_bridge(event):
             enabled = text == ".تشغيل الذكاء للكل"
             settings["ai_global_enabled"] = enabled
             settings["ai"] = enabled
+            bh.AI_GLOBAL_ENABLED = enabled
             save_json("settings.json", settings)
             answer = "✅ تم تشغيل الذكاء للجميع." if enabled else "🛑 تم إيقاف الذكاء للجميع."
             await tg.send_message(event.chat_id, answer)
