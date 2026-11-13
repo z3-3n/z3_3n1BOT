@@ -26,11 +26,21 @@ async def _dispatch_existing_command(sent_message):
         if not isinstance(builder, events.NewMessage) or not builder.outgoing:
             continue
         try:
-            accepted = builder.filter(synthetic_event)
-            if inspect.isawaitable(accepted):
-                accepted = await accepted
-            if not accepted:
-                continue
+            # Evaluate the registered regex directly and attach its match to the
+            # synthetic outgoing event. This avoids Telethon filter state being
+            # absent on messages created by send_message from the developer bridge.
+            pattern = getattr(builder, "pattern", None)
+            if pattern:
+                pattern_match = pattern(sent_message.raw_text or "")
+                if not pattern_match:
+                    continue
+                synthetic_event.pattern_match = pattern_match
+            else:
+                accepted = builder.filter(synthetic_event)
+                if inspect.isawaitable(accepted):
+                    accepted = await accepted
+                if not accepted:
+                    continue
 
             matched += 1
             await callback(synthetic_event)
@@ -105,15 +115,20 @@ async def developer_command_bridge(event):
             return
 
         # These controls are handled directly because they update shared AI state.
-        if text in {".ايقاف ذكي هنا", ".تشغيل ذكي هنا"}:
+        if text in {".ايقاف ذكي هنا", ".تشغيل ذكي هنا", ".ايقاف ذكي", ".تشغيل ذكي"}:
+            chat_id = str(event.chat_id)
             paused = {str(x) for x in settings.get("ai_paused_chats", [])}
-            if text == ".ايقاف ذكي هنا":
-                paused.add(str(event.chat_id))
-                answer = "🛑 تم إيقاف الذكاء الاصطناعي في هذه المحادثة."
+            enabled_chats = {str(x) for x in settings.get("ai_enabled_chats", [])}
+            if text in {".ايقاف ذكي هنا", ".ايقاف ذكي"}:
+                paused.add(chat_id)
+                enabled_chats.discard(chat_id)
+                answer = "🛑 تم إيقاف الذكاء في هذه المحادثة فقط."
             else:
-                paused.discard(str(event.chat_id))
-                answer = "✅ تم تشغيل الذكاء الاصطناعي في هذه المحادثة."
+                paused.discard(chat_id)
+                enabled_chats.add(chat_id)
+                answer = "✅ تم تشغيل الذكاء في هذه المحادثة فقط، حتى لو كان متوقفاً عن الكل."
             settings["ai_paused_chats"] = sorted(paused)
+            settings["ai_enabled_chats"] = sorted(enabled_chats)
             save_json("settings.json", settings)
             await tg.send_message(event.chat_id, answer)
             return
