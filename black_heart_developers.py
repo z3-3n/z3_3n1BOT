@@ -144,6 +144,7 @@ async def developer_command_bridge(event):
             enabled = text == ".تشغيل الذكاء للكل"
             settings["ai_global_enabled"] = enabled
             settings["ai"] = enabled
+            settings["ai_enabled_chats"] = []
             bh.AI_GLOBAL_ENABLED = enabled
             save_json("settings.json", settings)
             answer = "✅ تم تشغيل الذكاء للجميع." if enabled else "🛑 تم إيقاف الذكاء للجميع."
