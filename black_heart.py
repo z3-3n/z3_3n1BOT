@@ -538,25 +538,32 @@ async def mention_replied_user(event):
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.تشغيل ذكي$"))
 async def enable_ai(event):
-    paused_chats = set(str(x) for x in settings.get("ai_paused_chats", []))
-    paused_chats.discard(str(event.chat_id))
-    settings["ai_paused_chats"] = sorted(paused_chats)
+    chat_id = str(event.chat_id)
+    paused = {str(x) for x in settings.get("ai_paused_chats", [])}
+    enabled = {str(x) for x in settings.get("ai_enabled_chats", [])}
+    paused.discard(chat_id)
+    enabled.add(chat_id)
+    settings["ai_paused_chats"] = sorted(paused)
+    settings["ai_enabled_chats"] = sorted(enabled)
     if "AI_PAUSED_CHATS" in globals():
-        AI_PAUSED_CHATS.discard(str(event.chat_id))
+        AI_PAUSED_CHATS.discard(chat_id)
     save_json(SETTINGS_FILE, settings)
-    await event.edit("✅ تم تشغيل الذكاء الاصطناعي في هذه المحادثة.")
+    await event.edit("✅ تم تشغيل الذكاء في هذه المحادثة فقط، حتى لو كان متوقفاً عن الكل.")
 
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.ايقاف ذكي$"))
 async def disable_ai(event):
-    paused_chats = set(str(x) for x in settings.get("ai_paused_chats", []))
-    paused_chats.add(str(event.chat_id))
-    settings["ai_paused_chats"] = sorted(paused_chats)
+    chat_id = str(event.chat_id)
+    paused = {str(x) for x in settings.get("ai_paused_chats", [])}
+    enabled = {str(x) for x in settings.get("ai_enabled_chats", [])}
+    paused.add(chat_id)
+    enabled.discard(chat_id)
+    settings["ai_paused_chats"] = sorted(paused)
+    settings["ai_enabled_chats"] = sorted(enabled)
     if "AI_PAUSED_CHATS" in globals():
-        AI_PAUSED_CHATS.add(str(event.chat_id))
+        AI_PAUSED_CHATS.add(chat_id)
     save_json(SETTINGS_FILE, settings)
-    await event.edit("🛑 تم إيقاف الذكاء الاصطناعي في هذه المحادثة فقط.")
-
+    await event.edit("🛑 تم إيقاف الذكاء في هذه المحادثة فقط.")
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.تفعيل القصف$"))
 async def enable_qasf(event):
@@ -1005,9 +1012,13 @@ async def incoming_handler(event):
 
     # AI can be paused globally or separately in each chat. Other commands,
     # games, and auto-replies remain available while AI is paused.
-    if not settings.get("ai_global_enabled", settings.get("ai", True)):
+    chat_key_for_ai = str(event.chat_id)
+    paused_chats = {str(x) for x in settings.get("ai_paused_chats", [])}
+    enabled_chats = {str(x) for x in settings.get("ai_enabled_chats", [])}
+    # A local pause always wins; a local enable overrides global OFF here only.
+    if chat_key_for_ai in paused_chats:
         return
-    if str(event.chat_id) in settings.get("ai_paused_chats", []):
+    if not settings.get("ai_global_enabled", settings.get("ai", True)) and chat_key_for_ai not in enabled_chats:
         return
 
     # Automatic replies in private; in groups only when the account is mentioned.
@@ -1715,6 +1726,7 @@ ACTIVE_ANIMATIONS = {}
 def _save_ai_state():
     settings["ai_global_enabled"] = AI_GLOBAL_ENABLED
     settings["ai_paused_chats"] = sorted(AI_PAUSED_CHATS)
+    settings["ai_enabled_chats"] = sorted({str(x) for x in settings.get("ai_enabled_chats", [])})
     # Keep legacy key aligned for older versions of this source.
     settings["ai"] = AI_GLOBAL_ENABLED
     save_json(SETTINGS_FILE, settings)
@@ -1722,17 +1734,24 @@ def _save_ai_state():
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.ايقاف ذكي هنا$"))
 async def ai_pause_this_chat(event):
-    AI_PAUSED_CHATS.add(str(event.chat_id))
+    chat_id = str(event.chat_id)
+    AI_PAUSED_CHATS.add(chat_id)
+    enabled = {str(x) for x in settings.get("ai_enabled_chats", [])}
+    enabled.discard(chat_id)
+    settings["ai_enabled_chats"] = sorted(enabled)
     _save_ai_state()
-    await event.edit("🛑 تم إيقاف ردود الذكاء الاصطناعي في هذه المحادثة فقط. بقية الأوامر ما زالت تعمل.")
+    await event.edit("🛑 تم إيقاف الذكاء في هذه المحادثة فقط. بقية المحادثات لم تتغير.")
 
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.تشغيل ذكي هنا$"))
 async def ai_resume_this_chat(event):
-    AI_PAUSED_CHATS.discard(str(event.chat_id))
+    chat_id = str(event.chat_id)
+    AI_PAUSED_CHATS.discard(chat_id)
+    enabled = {str(x) for x in settings.get("ai_enabled_chats", [])}
+    enabled.add(chat_id)
+    settings["ai_enabled_chats"] = sorted(enabled)
     _save_ai_state()
-    await event.edit("✅ تم تشغيل الذكاء الاصطناعي في هذه المحادثة.")
-
+    await event.edit("✅ تم تشغيل الذكاء في هذه المحادثة فقط، حتى لو كان متوقفاً عن الكل.")
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.ايقاف الذكاء للكل$"))
 async def ai_pause_everywhere(event):
@@ -1928,10 +1947,76 @@ async def ai_wisdom(event):
     await _fresh_fun(event, "wisdom", "اكتب حكمة جديدة ذات معنى عملي وليست مبتذلة.")
 
 
+# Public Telegram channel posts are used as inspiration. Results are rewritten
+# into original Arabic rather than copying long channel posts verbatim.
+FUN_CHANNELS = {
+    "joke": ["YemeniCocktail", "ggbbaaa2023"],
+    "sad": ["C_P_B", "mshaeear", "iktipas_e"],
+    "pride": ["mshaeear", "WWISS0"],
+    "poetry": ["IlIllllllIll", "byat2", "deved_iraq"],
+}
+
+def _clean_channel_post(text):
+    value = (text or "").strip()
+    value = re.sub(r"https?://\S+|t\.me/\S+|@[A-Za-z0-9_]+", "", value)
+    value = re.sub(r"\n{3,}", "\n\n", value).strip()
+    return value
+
+async def _get_channel_inspiration(category):
+    channels = list(FUN_CHANNELS.get(category, []))
+    random.shuffle(channels)
+    candidates = []
+    for username in channels:
+        try:
+            entity = await tg.get_entity(username)
+            async for post in tg.iter_messages(entity, limit=70):
+                raw = _clean_channel_post(getattr(post, "message", "") or "")
+                if not raw or len(raw) < 30 or len(raw) > 1400:
+                    continue
+                if not re.search(r"[\u0600-\u06FF]", raw):
+                    continue
+                low = raw.casefold()
+                if any(x in low for x in ("للاعلان", "للاشتراك", "اشتركوا", "تابعونا", "قناة النشر", "تواصل معنا")):
+                    continue
+                if len(re.findall(r"[@#]", raw)) > 8:
+                    continue
+                candidates.append(raw)
+                if len(candidates) >= 35:
+                    break
+        except Exception as exc:
+            print("FUN CHANNEL READ ERROR:", username, exc)
+    return random.choice(candidates) if candidates else None
+
+async def _channel_fun(event, category, instruction):
+    source = await _get_channel_inspiration(category)
+    if not source:
+        return await event.edit("⚠️ ما قدرت أوصل لمنشورات القنوات الآن. تأكد أن الحساب يقدر يفتح القنوات.")
+    prompt = (
+        instruction + "\n\nهذه مادة مرجعية من قناة عامة؛ استخلص فكرتها فقط واكتب صياغة عربية أصلية "
+        "ومختصرة، ولا تنسخ النص حرفياً ولا تضف كلاماً جانبياً.\n\nالمادة المرجعية:\n" + source[:1000] +
+        "\n\nأرسل النتيجة فقط."
+    )
+    await event.edit("🖤 أختار لك من القنوات وأجهزها...")
+    answer = await ai_reply(prompt, "أنت محرر عربي يصنع صياغة أصلية قصيرة مستوحاة من مادة مرجعية. لا تنسخها حرفياً.")
+    if answer.startswith("⚠️"):
+        return await event.edit(answer)
+    await event.edit(answer[:3500])
+
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.نكتة$"))
 async def ai_joke(event):
-    await _fresh_fun(event, "joke", "اكتب نكتة قصيرة ذكية وخفيفة دون إساءة لأي فئة أو شخص.")
+    await _channel_fun(event, "joke", "حوّل الفكرة إلى نكتة يمنية خفيفة وذكية، واجعلها قصيرة ومفهومة، واحذف أي إعلان أو كلام جانبي.")
 
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.حزن$"))
+async def sad_phrase(event):
+    await _channel_fun(event, "sad", "اكتب عبارة حزينة راقية ومؤثرة بالفصحى، دون مبالغة أو إيحاءات مؤذية.")
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.كبرياء$"))
+async def pride_phrase(event):
+    await _channel_fun(event, "pride", "اكتب عبارة كبرياء وثقة بالنفس بالفصحى، قوية ومحترمة بلا غرور جارح.")
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.شعر$"))
+async def classical_poetry(event):
+    await _channel_fun(event, "poetry", "اكتب أبياتاً أصلية بالفصحى مستوحاة من موضوع النص، بلغة شعرية سليمة وقافية متناسقة، دون نقل أبيات القناة.")
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.اقتباس$"))
 async def ai_quote(event):
