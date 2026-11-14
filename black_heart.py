@@ -1961,8 +1961,8 @@ FUN_CHANNELS = {
 
 def _clean_channel_post(text):
     value = (text or "").strip()
-    value = re.sub(r"https?://\\S+|t\\.me/\\S+|@[A-Za-z0-9_]+", "", value)
-    value = re.sub(r"\\n{3,}", "\\n\\n", value).strip()
+    value = re.sub(r"https?://\S+|t\.me/\S+|@[A-Za-z0-9_]+", "", value)
+    value = re.sub(r"\n{3,}", "\n\n", value).strip()
     return value
 
 async def _get_channel_inspiration(category):
@@ -1976,7 +1976,7 @@ async def _get_channel_inspiration(category):
                 raw = _clean_channel_post(getattr(post, "message", "") or "")
                 if not raw or len(raw) < 30 or len(raw) > 1400:
                     continue
-                if not re.search(r"[\\u0600-\\u06FF]", raw):
+                if not re.search(r"[\u0600-\u06FF]", raw):
                     continue
                 low = raw.casefold()
                 if any(x in low for x in ("للاعلان", "للاشتراك", "اشتركوا", "تابعونا", "قناة النشر", "تواصل معنا")):
@@ -1998,7 +1998,7 @@ async def _send_official_poetry(event):
         posts = []
         async for post in tg.iter_messages(entity, limit=100):
             raw = getattr(post, "message", None)
-            if raw and raw.strip() and re.search(r"[\\u0600-\\u06FF]", raw):
+            if raw and raw.strip() and re.search(r"[\u0600-\u06FF]", raw):
                 posts.append(raw)
         if not posts:
             return await event.edit("⚠️ لم أجد قصائد نصية في القناة الرسمية.")
@@ -2017,8 +2017,8 @@ async def _channel_fun(event, category, instruction):
     if not source:
         return await event.edit("⚠️ ما قدرت أوصل لمنشورات القنوات الآن. تأكد أن الحساب يقدر يفتح القنوات.")
     prompt = (
-        instruction + "\\n\\nهذه مادة مرجعية من قناة عامة؛ استخلص فكرتها فقط واكتب صياغة عربية أصلية "
-        "ومختصرة، ولا تنسخ النص حرف@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.(شعر|بيت شعر)$"))
+        instruction + "\n\nهذه مادة مرجعية من قناة عامة؛ استخلص فكرتها فقط واكتب صياغة عربية أصلية "
+        "ومختصرة، ولا تنسخ النص حرف@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.(شعر|بيت شعر)$"))
 async def classical_poetry(event):
     await _send_official_poetry(event)مستوحاة من مادة مرجعية. لا تنسخها حرفياً.")
     if answer.startswith("⚠️"):
