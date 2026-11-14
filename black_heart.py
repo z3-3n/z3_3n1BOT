@@ -2050,9 +2050,8 @@ async def _send_official_poetry(event):
             raw = (getattr(post, "message", None) or "").strip()
             if not raw or getattr(post, "action", None):
                 continue
-            lines = [line.strip() for line in raw.splitlines() if line.strip()]
-            # استبعاد البيت القصير أو المنشور الذي لا يحتوي قصيدة كاملة.
-            if len(raw) < 100 or len(lines) < 3:
+            # اقبل القصائد الطويلة والقصيرة، حتى لو كانت بيتاً واحداً.
+            if len(raw) < 8:
                 continue
             if _has_iraqi_dialect_markers(raw):
                 continue
@@ -2080,7 +2079,7 @@ async def _send_official_poetry(event):
             prompt = (
                 "صنّف كل منشور على حدة. أعد سطراً واحداً بصيغة FUSHA: أرقام المنشورات الفصيحة فقط. "
                 "اعتبر الشعر العراقي والعامي IRAQI واستبعده، والنثر OTHER. "
-                "لا تعتبر البيت القصير أو العامي فصيحاً. لا تكتب أي شرح.\n\n" + numbered
+                "قد يكون الشعر الفصيح قصيدة طويلة أو بيتاً واحداً قصيراً؛ لا تستبعده بسبب قصره. استبعد العامي والعراقي فقط. لا تكتب أي شرح.\n\n" + numbered
             )
             answer = await ai_completion(
                 prompt,
