@@ -2000,24 +2000,27 @@ async def _classify_poetry_post(raw):
             prompt,
             "أنت مصنّف لغوي عربي متخصص في التفريق بين الشعر الفصيح والشعر العراقي العامي. أخرج كلمة واحدة فقط."
         )
-        label = (answer or "").strip().upper().split()[0].strip(".,:;!?") if answer else ""
-        return label if label in ("FUSHA", "IRAQI", "OTHER") else "OTHER"
+        if not answer or answer.strip().startswith("⚠️"):
+            print("POETRY CLASSIFIER UNAVAILABLE:", answer)
+            return "ERROR"
+        label = answer.strip().upper().split()[0].strip(".,:;!?")
+        return label if label in ("FUSHA", "IRAQI", "OTHER") else "ERROR"
     except Exception as exc:
         print("POETRY CLASSIFIER ERROR:", exc)
-        return "OTHER"
+        return "ERROR"
 
 
 async def _send_official_poetry(event):
-    # Scan source posts one by one; cache classification and send original FUSHA text only.
+    # Full-history scan with cached classifications; reclassify after filter updates.
     username = "deved_iraq"
+    CLASSIFIER_VERSION = 2
     try:
         entity = await tg.get_entity(username)
-        state = load_json(POETRY_STATE_FILE, {
-            "last_scanned_id": 0, "next_index": 0, "poems": [],
-            "used_ids": [], "classifications": {}
-        })
+        state = load_json(POETRY_STATE_FILE, {})
         if not isinstance(state, dict):
-            state = {"last_scanned_id": 0, "next_index": 0, "poems": [], "used_ids": [], "classifications": {}}
+            state = {}
+        if state.get("classifier_version") != CLASSIFIER_VERSION:
+            state = {"classifier_version": CLASSIFIER_VERSION, "last_scanned_id": 0, "next_index": 0, "poems": [], "used_ids": [], "classifications": {}}
         state.setdefault("last_scanned_id", 0)
         state.setdefault("next_index", 0)
         state.setdefault("poems", [])
@@ -2025,62 +2028,50 @@ async def _send_official_poetry(event):
         state.setdefault("classifications", {})
         if not isinstance(state["classifications"], dict):
             state["classifications"] = {}
-
         old_poems = state["poems"] if isinstance(state["poems"], list) else []
         old_index = max(0, int(state.get("next_index", 0) or 0))
-        old_sent_ids = {
-            int(item.get("id", 0)) for item in old_poems[:old_index]
-            if isinstance(item, dict)
-        }
-        verified = []
-        for item in old_poems:
-            if not isinstance(item, dict):
-                continue
-            post_id = int(item.get("id", 0) or 0)
-            label = await _classify_poetry_post(item.get("text", ""))
-            state["classifications"][str(post_id)] = label
-            if label == "FUSHA":
-                verified.append(item)
-
-        state["poems"] = verified
-        state["next_index"] = sum(
-            1 for item in verified if int(item.get("id", 0) or 0) in old_sent_ids
-        )
-        known_ids = {int(item.get("id", 0)) for item in verified}
-        newest_id = int(state.get("last_scanned_id", 0) or 0)
-
-        iterator = (
-            tg.iter_messages(entity, min_id=newest_id, reverse=True)
-            if newest_id else tg.iter_messages(entity, reverse=True)
-        )
-        async for post in iterator:
+        old_sent_ids = {int(item.get("id", 0)) for item in old_poems[:old_index] if isinstance(item, dict)}
+        had_errors = False
+        newest_id = 0
+        # Scan from the oldest post, not from a possibly stale cursor.
+        async for post in tg.iter_messages(entity, reverse=True):
             message_id = int(getattr(post, "id", 0) or 0)
             if not message_id:
                 continue
             newest_id = max(newest_id, message_id)
-            if message_id in known_ids:
+            raw = (getattr(post, "message", None) or "").strip()
+            if not raw:
                 continue
-            raw = getattr(post, "message", None) or ""
-            label = await _classify_poetry_post(raw)
-            state["classifications"][str(message_id)] = label
-            if label == "FUSHA":
-                state["poems"].append({"id": message_id, "text": raw})
-                known_ids.add(message_id)
-            state["last_scanned_id"] = newest_id
-            save_json(POETRY_STATE_FILE, state)
-
+            key = str(message_id)
+            label = state["classifications"].get(key)
+            if label not in ("FUSHA", "IRAQI", "OTHER"):
+                label = await _classify_poetry_post(raw)
+                if label == "ERROR":
+                    had_errors = True
+                    continue
+                state["classifications"][key] = label
+        eligible = []
+        async for post in tg.iter_messages(entity, reverse=True):
+            message_id = int(getattr(post, "id", 0) or 0)
+            if not message_id or state["classifications"].get(str(message_id)) != "FUSHA":
+                continue
+            raw = (getattr(post, "message", None) or "").strip()
+            if raw:
+                eligible.append({"id": message_id, "text": raw})
+        state["poems"] = eligible
+        state["next_index"] = sum(1 for item in eligible if int(item["id"]) in old_sent_ids)
         state["last_scanned_id"] = newest_id
-        state["poems"].sort(key=lambda item: int(item.get("id", 0)))
-        index = int(state.get("next_index", 0) or 0)
-        if index >= len(state["poems"]):
-            save_json(POETRY_STATE_FILE, state)
-            return await event.edit("🖤 لم أجد منشور شعر فصيحاً جديداً. تم تجاوز المنشورات العراقية والعامية.")
-
-        selected = state["poems"][index]
-        state["next_index"] = index + 1
-        state["used_ids"].append(int(selected["id"]))
+        state["classifier_version"] = CLASSIFIER_VERSION
         save_json(POETRY_STATE_FILE, state)
-
+        index = int(state.get("next_index", 0) or 0)
+        if index >= len(eligible):
+            if had_errors:
+                return await event.edit("⚠️ تعذّر تصنيف بعض المنشورات لأن خدمة الذكاء لم تستجب. تأكد من GROQ_API_KEY وسجل التشغيل ثم جرّب مجدداً.")
+            return await event.edit("🖤 فحصت منشورات القناة ولم أجد قصيدة فصيحة غير مرسلة. تم تجاوز الشعر العراقي والعامي.")
+        selected = eligible[index]
+        state["next_index"] = index + 1
+        state.setdefault("used_ids", []).append(int(selected["id"]))
+        save_json(POETRY_STATE_FILE, state)
         original = selected["text"]
         chunks = [original[i:i + 3500] for i in range(0, len(original), 3500)]
         await event.edit(chunks[0], parse_mode=None)
@@ -2088,7 +2079,7 @@ async def _send_official_poetry(event):
             await tg.send_message(event.chat_id, chunk, parse_mode=None)
     except Exception as exc:
         print("OFFICIAL POETRY CHANNEL ERROR:", exc)
-        await event.edit("⚠️ تعذّر قراءة القناة أو تصنيف منشوراتها عبر Groq. راجع سجل التشغيل ومفتاح Groq.")
+        await event.edit("⚠️ تعذّر قراءة قناة الشعر. تأكد أن الحساب مشترك في القناة وأنه يستطيع فتحها.")
 
 async def _channel_fun(event, category, instruction):
     source = await _get_channel_inspiration(category)
