@@ -54,6 +54,9 @@ PROTECTED_FILE = "protected_chats.json"
 AI_MODELS = [
     "openai/gpt-oss-20b",
     "openai/gpt-oss-120b",
+    "qwen/qwen3.8-27b",
+    "minimaxai/minimax-m2.7",
+    "meta-models/muse-spark-open",
 ]
 
 REPLY_STYLE = (
@@ -1951,13 +1954,20 @@ async def ai_wisdom(event):
     await _fresh_fun(event, "wisdom", "اكتب حكمة جديدة ذات معنى عملي وليست مبتذلة.")
 
 
-# Channel sources. Poetry is copied only from the user's designated official channel.
+# Channel sources. The user's official classical-poetry channel is deved_iraq.
 FUN_CHANNELS = {
     "joke": ["YemeniCocktail", "ggbbaaa2023"],
     "sad": ["C_P_B", "mshaeear", "iktipas_e"],
     "pride": ["mshaeear", "WWISS0"],
     "poetry": ["deved_iraq"],
 }
+
+POETRY_STATE_FILE = "official_poetry_state.json"
+IRAQI_DIALECT_MARKERS = (
+    "شلون", "شنو", "شكو", "هواي", "كلش", "آني", "اني", "هسه", "هسة",
+    "ماكو", "اكو", "أكو", "گلب", "گلبك", "چنت", "چان", "چانت",
+    "داحچي", "احچي", "ياهو", "وينك", "يمك", "وياك", "عليمن", "دخيلك",
+)
 
 def _clean_channel_post(text):
     value = (text or "").strip()
@@ -1990,27 +2000,72 @@ async def _get_channel_inspiration(category):
             print("FUN CHANNEL READ ERROR:", username, exc)
     return random.choice(candidates) if candidates else None
 
+def _is_classical_poetry_post(raw):
+    text_value = (raw or "").strip()
+    if len(text_value) < 20 or not re.search(r"[\u0600-\u06FF]", text_value):
+        return False
+    normalized = text_value.casefold()
+    words = set(re.findall(r"[\u0600-\u06FF]+", normalized))
+    if any(marker in words or marker in normalized for marker in IRAQI_DIALECT_MARKERS):
+        return False
+    lines = [line.strip() for line in text_value.splitlines() if line.strip()]
+    return len(lines) >= 2 or len(text_value) >= 90
+
 async def _send_official_poetry(event):
-    # Forward the complete original text without cleanup, truncation or AI rewriting.
+    # Scan the full channel archive oldest-to-newest, then keep a persistent queue.
+    # Each eligible classical-Arabic post is sent once; new posts are appended later.
     username = "deved_iraq"
     try:
         entity = await tg.get_entity(username)
-        posts = []
-        async for post in tg.iter_messages(entity, limit=100):
-            raw = getattr(post, "message", None)
-            if raw and raw.strip() and re.search(r"[\u0600-\u06FF]", raw):
-                posts.append(raw)
-        if not posts:
-            return await event.edit("⚠️ لم أجد قصائد نصية في القناة الرسمية.")
-        original = random.choice(posts)
-        # Split only at fixed character boundaries to respect Telegram's message limit.
+        state = load_json(POETRY_STATE_FILE, {
+            "last_scanned_id": 0,
+            "next_index": 0,
+            "poems": [],
+            "used_ids": []
+        })
+        if not isinstance(state, dict):
+            state = {"last_scanned_id": 0, "next_index": 0, "poems": [], "used_ids": []}
+        state.setdefault("last_scanned_id", 0)
+        state.setdefault("next_index", 0)
+        state.setdefault("poems", [])
+        state.setdefault("used_ids", [])
+        known_ids = {int(item.get("id", 0)) for item in state["poems"] if isinstance(item, dict)}
+        newest_id = int(state.get("last_scanned_id", 0) or 0)
+
+        iterator = (
+            tg.iter_messages(entity, min_id=newest_id, reverse=True)
+            if newest_id else tg.iter_messages(entity, reverse=True)
+        )
+        async for post in iterator:
+            message_id = int(getattr(post, "id", 0) or 0)
+            if not message_id:
+                continue
+            newest_id = max(newest_id, message_id)
+            raw = getattr(post, "message", None) or ""
+            if message_id not in known_ids and _is_classical_poetry_post(raw):
+                state["poems"].append({"id": message_id, "text": raw})
+                known_ids.add(message_id)
+
+        state["last_scanned_id"] = newest_id
+        state["poems"].sort(key=lambda item: int(item.get("id", 0)))
+        index = int(state.get("next_index", 0) or 0)
+        if index >= len(state["poems"]):
+            save_json(POETRY_STATE_FILE, state)
+            return await event.edit("🖤 انتهت القصائد الفصحى المتاحة حالياً في القناة. أضف منشورات جديدة وسأكمل بعدها دون تكرار.")
+
+        selected = state["poems"][index]
+        state["next_index"] = index + 1
+        state["used_ids"].append(int(selected["id"]))
+        save_json(POETRY_STATE_FILE, state)
+
+        original = selected["text"]
         chunks = [original[i:i + 3500] for i in range(0, len(original), 3500)]
         await event.edit(chunks[0], parse_mode=None)
         for chunk in chunks[1:]:
             await tg.send_message(event.chat_id, chunk, parse_mode=None)
     except Exception as exc:
         print("OFFICIAL POETRY CHANNEL ERROR:", exc)
-        await event.edit("⚠️ تعذّر جلب القصيدة من القناة الرسمية. تأكد أن الحساب يستطيع فتحها.")
+        await event.edit("⚠️ تعذّر قراءة أرشيف القناة الرسمية. تأكد أن الحساب يستطيع فتح @deved_iraq.")
 
 async def _channel_fun(event, category, instruction):
     source = await _get_channel_inspiration(category)
@@ -2018,9 +2073,11 @@ async def _channel_fun(event, category, instruction):
         return await event.edit("⚠️ ما قدرت أوصل لمنشورات القنوات الآن. تأكد أن الحساب يقدر يفتح القنوات.")
     prompt = (
         instruction + "\n\nهذه مادة مرجعية من قناة عامة؛ استخلص فكرتها فقط واكتب صياغة عربية أصلية "
-        "ومختصرة، ولا تنسخ النص حرف@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.(شعر|بيت شعر)$"))
-async def classical_poetry(event):
-    await _send_official_poetry(event)مستوحاة من مادة مرجعية. لا تنسخها حرفياً.")
+        "ومختصرة، ولا تنسخ النص حرفياً ولا تضف كلاماً جانبياً.\n\nالمادة المرجعية:\n" + source[:1000] +
+        "\n\nأرسل النتيجة فقط."
+    )
+    await event.edit("🖤 أختار لك من القنوات وأجهزها...")
+    answer = await ai_reply(prompt, "أنت محرر عربي يصنع صياغة أصلية قصيرة مستوحاة من مادة مرجعية. لا تنسخها حرفياً.")
     if answer.startswith("⚠️"):
         return await event.edit(answer)
     await event.edit(answer[:3500])
@@ -2037,10 +2094,9 @@ async def sad_phrase(event):
 async def pride_phrase(event):
     await _channel_fun(event, "pride", "اكتب عبارة كبرياء وثقة بالنفس بالفصحى، قوية ومحترمة بلا غرور جارح.")
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.شعر$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.(شعر|بيت شعر)$"))
 async def classical_poetry(event):
-    await _channel_fun(event, "poetry", "اكتب أبياتاً أصلية بالفصحى مستوحاة من موضوع النص، بلغة شعرية سليمة وقافية متناسقة، دون نقل أبيات القناة.")
-
+    await _send_official_poetry(event)
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.اقتباس$"))
 async def ai_quote(event):
     await _fresh_fun(event, "quote", "اكتب اقتباساً أصلي الصياغة عن الحياة أو التعلم أو الصبر، دون نسبته لشخص حقيقي.")
