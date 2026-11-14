@@ -1963,107 +1963,73 @@ FUN_CHANNELS = {
 }
 
 POETRY_STATE_FILE = "official_poetry_state.json"
-IRAQI_DIALECT_MARKERS = (
-    "شلون", "شنو", "شكو", "هواي", "كلش", "آني", "اني", "هسه", "هسة",
-    "ماكو", "اكو", "أكو", "گلب", "گلبك", "كلبي", "چنت", "چان", "چانت",
-    "داحچي", "احچي", "ياهو", "منو", "وينك", "يمك", "وياك", "عليمن", "دخيلك",
-    "شكد", "اشكد", "تره", "يابه", "خويه", "اخويه", "صدك", "يمته", "ماادري",
-    "مو", "ما ادري", "ما أدري", "هاذي", "هاي", "ذاك", "ذيج", "شلونك",
-    "اشلون", "اشلونك", "وين رايح", "وين رحت", "تعال", "تعالي"
-)
-
-# كلمات ولهجات عراقية واضحة؛ نطابق الكلمات كوحدات حتى لا نرفض كلمة فصيحة
-# لمجرد احتوائها على جزء من كلمة عامية.
-def _normalize_poetry_for_filter(value):
-    value = (value or "").casefold()
-    value = re.sub(r"[\u064B-\u065F\u0670\u0640]", "", value)
-    value = value.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
-    value = value.replace("ى", "ي")
-    return value
-
-def _is_classical_poetry_post(raw):
+async def _classify_poetry_post(raw):
+    """Classify one source post using the existing Groq configuration."""
     text_value = (raw or "").strip()
     if len(text_value) < 25 or not re.search(r"[\u0600-\u06FF]", text_value):
-        return False
+        return "OTHER"
+    prompt = (
+        "صنّف المنشور التالي وأجب بكلمة واحدة فقط: FUSHA أو IRAQI أو OTHER.\n"
+        "FUSHA: شعر عربي فصيح باللغة العربية الفصحى.\n"
+        "IRAQI: شعر باللهجة العراقية أو العامية العراقية، حتى لو كُتب بالحروف العربية "
+        "ولا يحتوي گ أو چ، وحتى لو كان موزوناً أو مقفى.\n"
+        "OTHER: نثر أو إعلان أو كلام غير شعري أو عامية غير عراقية.\n"
+        "احكم على لغة النص وتراكيبه كاملة، لا على كلمة منفردة. "
+        "كلمات مثل أنا وقلبي وأحبك لا تثبت وحدها أن النص فصيح.\n\n"
+        "المنشور:\n<<<\n" + text_value[:6000] + "\n>>>"
+    )
+    try:
+        answer = await ai_completion(
+            prompt,
+            "أنت مصنّف لغوي عربي متخصص في التفريق بين الشعر الفصيح والشعر العراقي العامي. أخرج كلمة واحدة فقط."
+        )
+        label = (answer or "").strip().upper().split()[0].strip(".,:;!?") if answer else ""
+        return label if label in ("FUSHA", "IRAQI", "OTHER") else "OTHER"
+    except Exception as exc:
+        print("POETRY CLASSIFIER ERROR:", exc)
+        return "OTHER"
 
-    # الحروف گ/چ/پ/ژ من أبرز علامات الكتابة العامية العراقية في هذا المصدر.
-    if re.search(r"[\u067E\u0686\u06AF\u0698]", text_value):
-        return False
-
-    normalized = _normalize_poetry_for_filter(text_value)
-    words = re.findall(r"[\u0600-\u06FF]+", normalized)
-    word_set = set(words)
-
-    # رفض اللهجة العراقية الصريحة، سواء ظهرت كلمة واحدة شديدة الدلالة
-    # أو أكثر من علامة عامية متوسطة.
-    strong_markers = {
-        "شلون", "شنو", "شكو", "هواي", "كلش", "اني", "آني", "هسه", "هسة",
-        "ماكو", "اكو", "اكو", "ياهو", "منو", "وينك", "يمك", "وياك",
-        "عليمن", "دخيلك", "شكد", "اشكد", "تره", "يابه", "خويه", "اخويه",
-        "صدك", "يمته", "چنت", "چان", "چانت", "گلب", "گلبك", "كلبي",
-        "داحچي", "احچي", "اشلون", "اشلونك"
-    }
-    if word_set.intersection(strong_markers):
-        return False
-
-    # صيغ عامية أخرى شائعة؛ وجود علامتين منها يستبعد النص لتقليل الاستبعاد الخاطئ.
-    medium_markers = {
-        "مو", "هاي", "هاذي", "ذيج", "شلونك", "ماادري", "وين", "ليش",
-        "شنو", "هسه", "ورا", "جنت", "جان", "جانت", "دا", "احنه",
-        "انتو", "علي", "عليج", "ويا", "يمعود", "معود"
-    }
-    if len(word_set.intersection(medium_markers)) >= 2:
-        return False
-
-    # لا نمرر المنشورات النثرية القصيرة على أنها قصائد.
-    lines = [line.strip() for line in text_value.splitlines() if line.strip()]
-    if len(lines) < 2 and len(text_value) < 100:
-        return False
-
-    return True
 
 async def _send_official_poetry(event):
-    # قراءة أرشيف القناة كاملاً أول مرة، ثم قراءة المنشورات الجديدة فقط.
-    # نحفظ النص الأصلي كما هو، ونرسل كل قصيدة فصيحة مرة واحدة دون إعادة صياغة.
+    # Scan source posts one by one; cache classification and send original FUSHA text only.
     username = "deved_iraq"
     try:
         entity = await tg.get_entity(username)
         state = load_json(POETRY_STATE_FILE, {
-            "last_scanned_id": 0,
-            "next_index": 0,
-            "poems": [],
-            "used_ids": []
+            "last_scanned_id": 0, "next_index": 0, "poems": [],
+            "used_ids": [], "classifications": {}
         })
         if not isinstance(state, dict):
-            state = {"last_scanned_id": 0, "next_index": 0, "poems": [], "used_ids": []}
-
+            state = {"last_scanned_id": 0, "next_index": 0, "poems": [], "used_ids": [], "classifications": {}}
         state.setdefault("last_scanned_id", 0)
         state.setdefault("next_index", 0)
         state.setdefault("poems", [])
         state.setdefault("used_ids", [])
+        state.setdefault("classifications", {})
+        if not isinstance(state["classifications"], dict):
+            state["classifications"] = {}
 
-        # إعادة فحص القصائد المحفوظة سابقاً حتى لا تُرسل قصيدة عراقية
-        # دخلت إلى قائمة الانتظار بالفلتر القديم.
         old_poems = state["poems"] if isinstance(state["poems"], list) else []
         old_index = max(0, int(state.get("next_index", 0) or 0))
-        filtered_poems = []
-        sent_before_index = 0
-        for position, item in enumerate(old_poems):
-            if not isinstance(item, dict):
-                continue
-            original_text = item.get("text", "")
-            if _is_classical_poetry_post(original_text):
-                filtered_poems.append(item)
-                if position < old_index:
-                    sent_before_index += 1
-
-        state["poems"] = filtered_poems
-        state["next_index"] = sent_before_index
-        known_ids = {
-            int(item.get("id", 0))
-            for item in state["poems"]
+        old_sent_ids = {
+            int(item.get("id", 0)) for item in old_poems[:old_index]
             if isinstance(item, dict)
         }
+        verified = []
+        for item in old_poems:
+            if not isinstance(item, dict):
+                continue
+            post_id = int(item.get("id", 0) or 0)
+            label = await _classify_poetry_post(item.get("text", ""))
+            state["classifications"][str(post_id)] = label
+            if label == "FUSHA":
+                verified.append(item)
+
+        state["poems"] = verified
+        state["next_index"] = sum(
+            1 for item in verified if int(item.get("id", 0) or 0) in old_sent_ids
+        )
+        known_ids = {int(item.get("id", 0)) for item in verified}
         newest_id = int(state.get("last_scanned_id", 0) or 0)
 
         iterator = (
@@ -2075,24 +2041,29 @@ async def _send_official_poetry(event):
             if not message_id:
                 continue
             newest_id = max(newest_id, message_id)
+            if message_id in known_ids:
+                continue
             raw = getattr(post, "message", None) or ""
-            if message_id not in known_ids and _is_classical_poetry_post(raw):
+            label = await _classify_poetry_post(raw)
+            state["classifications"][str(message_id)] = label
+            if label == "FUSHA":
                 state["poems"].append({"id": message_id, "text": raw})
                 known_ids.add(message_id)
+            state["last_scanned_id"] = newest_id
+            save_json(POETRY_STATE_FILE, state)
 
         state["last_scanned_id"] = newest_id
         state["poems"].sort(key=lambda item: int(item.get("id", 0)))
         index = int(state.get("next_index", 0) or 0)
         if index >= len(state["poems"]):
             save_json(POETRY_STATE_FILE, state)
-            return await event.edit("🖤 لا توجد قصائد فصحى جديدة في القناة حالياً. سأكمل عند توفر منشورات فصيحة جديدة دون تكرار.")
+            return await event.edit("🖤 لم أجد منشور شعر فصيحاً جديداً. تم تجاوز المنشورات العراقية والعامية.")
 
         selected = state["poems"][index]
         state["next_index"] = index + 1
         state["used_ids"].append(int(selected["id"]))
         save_json(POETRY_STATE_FILE, state)
 
-        # إرسال النص الأصلي كاملاً كما نشرته القناة، دون تعديل أو اختصار.
         original = selected["text"]
         chunks = [original[i:i + 3500] for i in range(0, len(original), 3500)]
         await event.edit(chunks[0], parse_mode=None)
@@ -2100,7 +2071,7 @@ async def _send_official_poetry(event):
             await tg.send_message(event.chat_id, chunk, parse_mode=None)
     except Exception as exc:
         print("OFFICIAL POETRY CHANNEL ERROR:", exc)
-        await event.edit("⚠️ تعذّر قراءة أرشيف القناة الرسمية. تأكد أن الحساب يستطيع فتح @deved_iraq.")
+        await event.edit("⚠️ تعذّر قراءة القناة أو تصنيف منشوراتها عبر Groq. راجع سجل التشغيل ومفتاح Groq.")
 
 async def _channel_fun(event, category, instruction):
     source = await _get_channel_inspiration(category)
