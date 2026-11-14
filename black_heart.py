@@ -2062,7 +2062,7 @@ async def _send_official_poetry(event):
         scanned = 0
 
         # limit=0 يعني قراءة كامل سجل القناة، والأحدث يأتي أولاً.
-        async for post in tg.iter_messages(entity, limit=0):
+        async for post in tg.iter_messages(entity):
             raw = (getattr(post, "message", None) or "").strip()
             if not raw or getattr(post, "action", None):
                 continue
