@@ -1963,19 +1963,36 @@ FUN_CHANNELS = {
 }
 
 POETRY_STATE_FILE = "official_poetry_state.json"
+
+def _has_iraqi_dialect_markers(value):
+    """Reject clear Iraqi colloquial wording before asking the language model."""
+    normalized = re.sub(r"[\u064B-\u065F\u0670ـ]", "", (value or "").lower())
+    iraqi_markers = (
+        "جاسنه", "اجيتو", "ببالنه", "احوالنه", "شلون", "شكو", "شنو",
+        "هسه", "هسة", "چان", "چانت", "گلب", "گال", "ماكو", "اكو",
+        "عليچ", "منچ", "إلچ", "وينچ", "ليش هيچ", "مو هيج"
+    )
+    return any(marker in normalized for marker in iraqi_markers)
+
 async def _classify_poetry_post(raw):
-    """Classify one source post using the existing Groq configuration."""
+    """Classify the complete post; clear Iraqi dialect is always rejected."""
     text_value = (raw or "").strip()
     if len(text_value) < 25 or not re.search(r"[\u0600-\u06FF]", text_value):
         return "OTHER"
+    if _has_iraqi_dialect_markers(text_value):
+        return "IRAQI"
     prompt = (
-        "صنّف المنشور التالي وأجب بكلمة واحدة فقط: FUSHA أو IRAQI أو OTHER.\n"
-        "FUSHA: شعر عربي فصيح باللغة العربية الفصحى.\n"
-        "IRAQI: شعر باللهجة العراقية أو العامية العراقية، حتى لو كُتب بالحروف العربية "
-        "ولا يحتوي گ أو چ، وحتى لو كان موزوناً أو مقفى.\n"
-        "OTHER: نثر أو إعلان أو كلام غير شعري أو عامية غير عراقية.\n"
-        "احكم على لغة النص وتراكيبه كاملة، لا على كلمة منفردة. "
-        "كلمات مثل أنا وقلبي وأحبك لا تثبت وحدها أن النص فصيح.\n\n"
+        "صنّف المنشور كاملاً وأجب بكلمة واحدة فقط: FUSHA أو IRAQI أو OTHER.\n"
+        "FUSHA: شعر عربي باللغة الفصحى، بتراكيب فصيحة سليمة، وليس مجرد كلمات عربية.\n"
+        "IRAQI: أي شعر باللهجة العراقية أو العامية العراقية، حتى لو كان موزوناً ومقفى "
+        "وحتى لو لم تظهر فيه حروف گ أو چ.\n"
+        "OTHER: نثر أو إعلان أو كلام غير شعري أو عامية من لهجة أخرى.\n"
+        "هذه أمثلة عراقية يجب تصنيفها IRAQI: "
+        "جاسنه الليل واجيتو ببالنه / ولعبت صوركم لعب بأحوالنه.\n"
+        "وهذا مثال فصيح يجب تصنيفه FUSHA: "
+        "ولقد نويت الحب حين رأيته / ولكل قلب في المحبة ما نوى.\n"
+        "لا تصنف النص فصيحاً لمجرد وجود كلمات مثل قلبي أو الحب أو الليل. "
+        "افحص جميع الأبيات والتراكيب، وإذا اختلطت الفصحى بالعامية فاستبعد المنشور.\n\n"
         "المنشور:\n<<<\n" + text_value[:6000] + "\n>>>"
     )
     try:
