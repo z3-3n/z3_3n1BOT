@@ -299,7 +299,7 @@ MENU_PAGES = {
  12: "📣 **النشر والجدولة**\n`.نشر النص` - إرسال نص في المحادثة الحالية\n`.جدولة 10 النص` - إرسال النص بعد 10 دقائق (يمكن تغيير الرقم)\nاستخدمها باعتدال وفي المحادثات التي تملك حق النشر فيها.",
  13: "🧮 **الأدوات**\n`.وقت` - الوقت الحالي\n`.تاريخ` - التاريخ الحالي\n`.رابط الرسالة` بالرد - رابط الرسالة إذا كانت المجموعة عامة أو الرابط متاحاً",
  14: "⚙️ **حالة السورس**\n`.حالة` - حالة الاتصال والذكاء\n`.احصائيات` - عدد الرسائل المرصودة في هذه النسخة\nالإحصائيات تبدأ من وقت تشغيل هذه النسخة ولا تسترجع التاريخ السابق.",
- 15: "🎭 **التسلية**\n`.نكتة` / `.حكمة` / `.لغز` / `.جواب`\n`.حزن` / `.كبرياء` / `.شعر`\n`.حظ` / `.اقتباس`"
+ 15: "🎭 **التسلية**\n`.نكتة` / `.حكمة` / `.لغز` / `.جواب`\n`.حزن` / `.كبرياء` / `.شعر` / `.بيت شعر`\n`.حظ` / `.اقتباس`"
 }
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.الاوامر$"))
@@ -1951,19 +1951,18 @@ async def ai_wisdom(event):
     await _fresh_fun(event, "wisdom", "اكتب حكمة جديدة ذات معنى عملي وليست مبتذلة.")
 
 
-# Public Telegram channel posts are used as inspiration. Results are rewritten
-# into original Arabic rather than copying long channel posts verbatim.
+# Channel sources. Poetry is copied only from the user's designated official channel.
 FUN_CHANNELS = {
     "joke": ["YemeniCocktail", "ggbbaaa2023"],
     "sad": ["C_P_B", "mshaeear", "iktipas_e"],
     "pride": ["mshaeear", "WWISS0"],
-    "poetry": ["IlIllllllIll", "byat2", "deved_iraq"],
+    "poetry": ["deved_iraq"],
 }
 
 def _clean_channel_post(text):
     value = (text or "").strip()
-    value = re.sub(r"https?://\S+|t\.me/\S+|@[A-Za-z0-9_]+", "", value)
-    value = re.sub(r"\n{3,}", "\n\n", value).strip()
+    value = re.sub(r"https?://\\S+|t\\.me/\\S+|@[A-Za-z0-9_]+", "", value)
+    value = re.sub(r"\\n{3,}", "\\n\\n", value).strip()
     return value
 
 async def _get_channel_inspiration(category):
@@ -1977,7 +1976,7 @@ async def _get_channel_inspiration(category):
                 raw = _clean_channel_post(getattr(post, "message", "") or "")
                 if not raw or len(raw) < 30 or len(raw) > 1400:
                     continue
-                if not re.search(r"[\u0600-\u06FF]", raw):
+                if not re.search(r"[\\u0600-\\u06FF]", raw):
                     continue
                 low = raw.casefold()
                 if any(x in low for x in ("للاعلان", "للاشتراك", "اشتركوا", "تابعونا", "قناة النشر", "تواصل معنا")):
@@ -1991,17 +1990,37 @@ async def _get_channel_inspiration(category):
             print("FUN CHANNEL READ ERROR:", username, exc)
     return random.choice(candidates) if candidates else None
 
+async def _send_official_poetry(event):
+    # Forward the complete original text without cleanup, truncation or AI rewriting.
+    username = "deved_iraq"
+    try:
+        entity = await tg.get_entity(username)
+        posts = []
+        async for post in tg.iter_messages(entity, limit=100):
+            raw = getattr(post, "message", None)
+            if raw and raw.strip() and re.search(r"[\\u0600-\\u06FF]", raw):
+                posts.append(raw)
+        if not posts:
+            return await event.edit("⚠️ لم أجد قصائد نصية في القناة الرسمية.")
+        original = random.choice(posts)
+        # Split only at fixed character boundaries to respect Telegram's message limit.
+        chunks = [original[i:i + 3500] for i in range(0, len(original), 3500)]
+        await event.edit(chunks[0], parse_mode=None)
+        for chunk in chunks[1:]:
+            await tg.send_message(event.chat_id, chunk, parse_mode=None)
+    except Exception as exc:
+        print("OFFICIAL POETRY CHANNEL ERROR:", exc)
+        await event.edit("⚠️ تعذّر جلب القصيدة من القناة الرسمية. تأكد أن الحساب يستطيع فتحها.")
+
 async def _channel_fun(event, category, instruction):
     source = await _get_channel_inspiration(category)
     if not source:
         return await event.edit("⚠️ ما قدرت أوصل لمنشورات القنوات الآن. تأكد أن الحساب يقدر يفتح القنوات.")
     prompt = (
-        instruction + "\n\nهذه مادة مرجعية من قناة عامة؛ استخلص فكرتها فقط واكتب صياغة عربية أصلية "
-        "ومختصرة، ولا تنسخ النص حرفياً ولا تضف كلاماً جانبياً.\n\nالمادة المرجعية:\n" + source[:1000] +
-        "\n\nأرسل النتيجة فقط."
-    )
-    await event.edit("🖤 أختار لك من القنوات وأجهزها...")
-    answer = await ai_reply(prompt, "أنت محرر عربي يصنع صياغة أصلية قصيرة مستوحاة من مادة مرجعية. لا تنسخها حرفياً.")
+        instruction + "\\n\\nهذه مادة مرجعية من قناة عامة؛ استخلص فكرتها فقط واكتب صياغة عربية أصلية "
+        "ومختصرة، ولا تنسخ النص حرف@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.(شعر|بيت شعر)$"))
+async def classical_poetry(event):
+    await _send_official_poetry(event)مستوحاة من مادة مرجعية. لا تنسخها حرفياً.")
     if answer.startswith("⚠️"):
         return await event.edit(answer)
     await event.edit(answer[:3500])
