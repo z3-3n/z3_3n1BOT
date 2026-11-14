@@ -2037,7 +2037,7 @@ async def _send_official_poetry(event):
     username = "deved_iraq"
     CLASSIFIER_VERSION = 2
     try:
-        await event.edit("🖤 جاري البحث عن شعر فصيح في القناة...\\nيتم تجاوز الشعر العراقي والعامي.")
+        await event.edit("🖤 جاري البحث عن شعر فصيح في القناة...\nيتم تجاوز الشعر العراقي والعامي.")
         entity = await tg.get_entity(username)
         state = load_json(POETRY_STATE_FILE, {})
         if not isinstance(state, dict):
