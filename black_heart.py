@@ -2033,10 +2033,11 @@ async def _classify_poetry_post(raw):
 
 
 async def _send_official_poetry(event):
-    # Full-history scan with cached classifications; reclassify after filter updates.
+    # Scan channel history, cache classifications, and send only original FUSHA posts.
     username = "deved_iraq"
     CLASSIFIER_VERSION = 2
     try:
+        await event.edit("🖤 جاري البحث عن شعر فصيح في القناة...\\nيتم تجاوز الشعر العراقي والعامي.")
         entity = await tg.get_entity(username)
         state = load_json(POETRY_STATE_FILE, {})
         if not isinstance(state, dict):
@@ -2070,10 +2071,13 @@ async def _send_official_poetry(event):
                 label = await _classify_poetry_post(raw)
                 if label == "ERROR":
                     had_errors = True
-                    # Stop immediately on a temporary AI/rate-limit failure.
-                    # Do not hammer the API once the classifier is unavailable.
+                    print("POETRY SCAN PAUSED: classifier unavailable at post", message_id)
+                    # Never send a post whose language classification failed.
                     break
                 state["classifications"][key] = label
+                state["last_scanned_id"] = message_id
+                state["classifier_version"] = CLASSIFIER_VERSION
+                save_json(POETRY_STATE_FILE, state)
         eligible = []
         async for post in tg.iter_messages(entity, reverse=True):
             message_id = int(getattr(post, "id", 0) or 0)
@@ -2090,7 +2094,7 @@ async def _send_official_poetry(event):
         index = int(state.get("next_index", 0) or 0)
         if index >= len(eligible):
             if had_errors:
-                return await event.edit("⚠️ تعذّر تصنيف بعض المنشورات لأن خدمة الذكاء لم تستجب. تأكد من GROQ_API_KEY وسجل التشغيل ثم جرّب مجدداً.")
+                return await event.edit("⚠️ توقف فحص الشعر مؤقتاً لأن خدمة التصنيف لم تستجب (قد يكون حد الطلبات 429). لم أرسل أي منشور غير متأكد من فصاحته. جرّب لاحقاً.")
             return await event.edit("🖤 فحصت منشورات القناة ولم أجد قصيدة فصيحة غير مرسلة. تم تجاوز الشعر العراقي والعامي.")
         selected = eligible[index]
         state["next_index"] = index + 1
