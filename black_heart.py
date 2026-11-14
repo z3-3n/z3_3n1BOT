@@ -247,7 +247,7 @@ async def ai_completion(prompt, system, history=None):
                 is_rate_limit = status_code == 429 or "rate_limit_exceeded" in error_text.lower() or "rate limit reached" in error_text.lower()
                 if is_rate_limit:
                     import re as _rate_re
-                    match = _rate_re.search(r"try again in\\s*([0-9]+(?:\\.[0-9]+)?)\\s*s", error_text, _rate_re.I)
+                    match = _rate_re.search(r"try again in\s*([0-9]+(?:\.[0-9]+)?)\s*s", error_text, _rate_re.I)
                     wait_seconds = float(match.group(1)) if match else 5.0
                     wait_seconds = max(2.0, min(wait_seconds + 1.0, 30.0))
                     AI_RATE_LIMIT_UNTIL = time.monotonic() + wait_seconds
@@ -2070,7 +2070,9 @@ async def _send_official_poetry(event):
                 label = await _classify_poetry_post(raw)
                 if label == "ERROR":
                     had_errors = True
-                    continue
+                    # Stop immediately on a temporary AI/rate-limit failure.
+                    # Do not hammer the API once the classifier is unavailable.
+                    break
                 state["classifications"][key] = label
         eligible = []
         async for post in tg.iter_messages(entity, reverse=True):
