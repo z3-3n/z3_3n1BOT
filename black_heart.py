@@ -200,40 +200,62 @@ try:
 except Exception as exc:
     print("AI MEMORY INIT ERROR:", exc)
 
+AI_REQUEST_LOCK = asyncio.Lock()
+AI_RATE_LIMIT_UNTIL = 0.0
+
 async def ai_completion(prompt, system, history=None):
+    global AI_RATE_LIMIT_UNTIL
     if client_ai is None:
         return "⚠️ مفتاح GROQ_API_KEY غير مضبوط في Secrets."
 
-    errors = []
+    now = time.monotonic()
+    if now < AI_RATE_LIMIT_UNTIL:
+        remaining = max(1, int(AI_RATE_LIMIT_UNTIL - now))
+        return f"⚠️ خدمة الذكاء مزدحمة بسبب حد الاستخدام المؤقت. انتظر {remaining} ثانية ثم جرّب."
+
     selected_model = settings.get("selected_ai_model", AI_MODELS[0])
     models_to_try = [selected_model] + [m for m in AI_MODELS if m != selected_model]
     messages = [{"role":"system","content":system}]
     if history:
         messages.extend(history[-MEMORY_LIMIT:])
     messages.append({"role":"user","content":prompt or "ابدأ الحديث"})
-    for model in models_to_try:
-        try:
-            response = await asyncio.to_thread(
-                client_ai.chat.completions.create,
-                model=model,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=500,
-            )
-            if response.choices:
-                content = response.choices[0].message.content
-                if content:
-                    print("AI MODEL USED:", model)
-                    return content.strip()
-            errors.append(f"{model}: empty response")
-        except Exception as exc:
-            errors.append(f"{model}: {exc}")
-            print("AI MODEL ERROR:", model, exc)
 
-    return (
-        "⚠️ تعذّر الاتصال بجميع نماذج الذكاء المتاحة حالياً. "
-        "تحقق من مفتاح Groq وحدود الاستخدام وحالة النماذج."
-    )
+    async with AI_REQUEST_LOCK:
+        now = time.monotonic()
+        if now < AI_RATE_LIMIT_UNTIL:
+            remaining = max(1, int(AI_RATE_LIMIT_UNTIL - now))
+            return f"⚠️ خدمة الذكاء مزدحمة. انتظر {remaining} ثانية ثم جرّب."
+
+        for model in models_to_try:
+            try:
+                response = await asyncio.to_thread(
+                    client_ai.chat.completions.create,
+                    model=model,
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=300,
+                )
+                if response.choices:
+                    content = response.choices[0].message.content
+                    if content:
+                        print("AI MODEL USED:", model)
+                        return content.strip()
+                print("AI MODEL EMPTY RESPONSE:", model)
+            except Exception as exc:
+                error_text = str(exc)
+                status_code = getattr(exc, "status_code", None)
+                is_rate_limit = status_code == 429 or "rate_limit_exceeded" in error_text.lower() or "rate limit reached" in error_text.lower()
+                if is_rate_limit:
+                    import re as _rate_re
+                    match = _rate_re.search(r"try again in\\s*([0-9]+(?:\\.[0-9]+)?)\\s*s", error_text, _rate_re.I)
+                    wait_seconds = float(match.group(1)) if match else 5.0
+                    wait_seconds = max(2.0, min(wait_seconds + 1.0, 30.0))
+                    AI_RATE_LIMIT_UNTIL = time.monotonic() + wait_seconds
+                    print(f"AI RATE LIMIT: {model}; cooling down {wait_seconds:.1f}s")
+                    return f"⚠️ وصلت خدمة الذكاء إلى حد الاستخدام المؤقت. انتظر نحو {int(wait_seconds)} ثانية ثم أعد المحاولة."
+                print("AI MODEL ERROR:", model, exc)
+
+    return "⚠️ تعذّر الاتصال بنماذج الذكاء المتاحة حالياً. تحقق من مفتاح Groq وحالة النماذج."
 
 
 async def ai_reply(prompt, system, history=None):
@@ -2081,32 +2103,62 @@ async def _send_official_poetry(event):
         print("OFFICIAL POETRY CHANNEL ERROR:", exc)
         await event.edit("⚠️ تعذّر قراءة قناة الشعر. تأكد أن الحساب مشترك في القناة وأنه يستطيع فتحها.")
 
-async def _channel_fun(event, category, instruction):
+async def _get_channel_inspiration(category):
+    channels = FUN_CHANNELS.get(category, [])
+    if not channels:
+        return None
+    used_key = f"channel_{category}"
+    used = set(str(x) for x in fun_history.get(used_key, []))
+    candidates = []
+    for username in channels:
+        try:
+            entity = await tg.get_entity(username)
+            async for post in tg.iter_messages(entity, limit=80):
+                raw = (getattr(post, "message", None) or "").strip()
+                if not raw or len(raw) < 15:
+                    continue
+                if getattr(post, "action", None):
+                    continue
+                post_id = f"{username}:{post.id}"
+                if post_id in used:
+                    continue
+                candidates.append((post_id, raw))
+        except Exception as exc:
+            print("FUN CHANNEL READ ERROR:", username, exc)
+    if not candidates:
+        return None
+    selected_id, selected_text = random.choice(candidates)
+    used.add(selected_id)
+    fun_history[used_key] = list(used)[-300:]
+    save_json(FUN_HISTORY_FILE, fun_history)
+    return selected_text
+
+async def _channel_fun(event, category, instruction=None):
+    await event.edit("🖤 أبحث في منشورات القنوات...")
     source = await _get_channel_inspiration(category)
     if not source:
-        return await event.edit("⚠️ ما قدرت أوصل لمنشورات القنوات الآن. تأكد أن الحساب يقدر يفتح القنوات.")
-    prompt = (
-        instruction + "\n\nهذه مادة مرجعية من قناة عامة؛ استخلص فكرتها فقط واكتب صياغة عربية أصلية "
-        "ومختصرة، ولا تنسخ النص حرفياً ولا تضف كلاماً جانبياً.\n\nالمادة المرجعية:\n" + source[:1000] +
-        "\n\nأرسل النتيجة فقط."
-    )
-    await event.edit("🖤 أختار لك من القنوات وأجهزها...")
-    answer = await ai_reply(prompt, "أنت محرر عربي يصنع صياغة أصلية قصيرة مستوحاة من مادة مرجعية. لا تنسخها حرفياً.")
-    if answer.startswith("⚠️"):
-        return await event.edit(answer)
-    await event.edit(answer[:3500])
+        return await event.edit("⚠️ لم أجد منشوراً جديداً في قنوات هذا القسم، أو تعذّر الوصول إليها.")
+    # نقل حرفي كامل: لا تلخيص ولا إعادة صياغة ولا استدعاء للذكاء الاصطناعي.
+    chunks = [source[i:i + 3500] for i in range(0, len(source), 3500)]
+    await event.edit(chunks[0], parse_mode=None)
+    for chunk in chunks[1:]:
+        await tg.send_message(event.chat_id, chunk, parse_mode=None)
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.نكتة$"))
 async def ai_joke(event):
-    await _channel_fun(event, "joke", "حوّل الفكرة إلى نكتة يمنية خفيفة وذكية، واجعلها قصيرة ومفهومة، واحذف أي إعلان أو كلام جانبي.")
+    await _channel_fun(event, "joke")
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.حزن$"))
 async def sad_phrase(event):
-    await _channel_fun(event, "sad", "اكتب عبارة حزينة راقية ومؤثرة بالفصحى، دون مبالغة أو إيحاءات مؤذية.")
+    await _channel_fun(event, "sad")
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.عتاب$"))
+async def reproach_phrase(event):
+    await _channel_fun(event, "sad")
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.كبرياء$"))
 async def pride_phrase(event):
-    await _channel_fun(event, "pride", "اكتب عبارة كبرياء وثقة بالنفس بالفصحى، قوية ومحترمة بلا غرور جارح.")
+    await _channel_fun(event, "pride")
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.(شعر|بيت شعر)$"))
 async def classical_poetry(event):
