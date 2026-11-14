@@ -2074,13 +2074,13 @@ async def _send_official_poetry(event):
         pending = [(pid, text) for pid, text in candidates
                    if state["classifications"].get(str(pid)) not in ("FUSHA", "IRAQI", "OTHER")]
         if pending:
-            numbered = "\\n\\n".join(
-                f"POST {i}:\\n{text[:1800]}" for i, (_, text) in enumerate(pending, 1)
+            numbered = "\n\n".join(
+                f"POST {i}:\n{text[:1800]}" for i, (_, text) in enumerate(pending, 1)
             )
             prompt = (
                 "صنّف كل منشور على حدة. أعد سطراً واحداً بصيغة FUSHA: أرقام المنشورات الفصيحة فقط. "
                 "اعتبر الشعر العراقي والعامي IRAQI واستبعده، والنثر OTHER. "
-                "لا تعتبر البيت القصير أو العامي فصيحاً. لا تكتب أي شرح.\\n\\n" + numbered
+                "لا تعتبر البيت القصير أو العامي فصيحاً. لا تكتب أي شرح.\n\n" + numbered
             )
             answer = await ai_completion(
                 prompt,
@@ -2089,11 +2089,11 @@ async def _send_official_poetry(event):
             if not answer or answer.strip().startswith("⚠️"):
                 print("POETRY BATCH CLASSIFIER UNAVAILABLE:", answer)
                 return await event.edit("⚠️ تعذّر تصنيف الشعر حالياً بسبب ضغط خدمة الذكاء. جرّب بعد قليل.")
-            match = re.search(r"FUSHA\\s*:\\s*([0-9,، ]*)", answer, re.I)
+            match = re.search(r"FUSHA\s*:\s*([0-9,، ]*)", answer, re.I)
             fusha_indexes = set()
             if match:
                 fusha_indexes = {
-                    int(x) for x in re.findall(r"\\d+", match.group(1))
+                    int(x) for x in re.findall(r"\d+", match.group(1))
                     if 1 <= int(x) <= len(pending)
                 }
             for i, (pid, _) in enumerate(pending, 1):
