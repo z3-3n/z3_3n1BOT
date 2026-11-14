@@ -2033,74 +2033,84 @@ async def _classify_poetry_post(raw):
 
 
 async def _send_official_poetry(event):
-    # Scan channel history, cache classifications, and send only original FUSHA posts.
+    # تجاهل أحدث 20 رسالة، وافحص العشرين التي تسبقها فقط.
     username = "deved_iraq"
-    CLASSIFIER_VERSION = 2
+    CLASSIFIER_VERSION = 3
     try:
-        await event.edit("🖤 جاري البحث عن شعر فصيح في القناة...\nيتم تجاوز الشعر العراقي والعامي.")
+        await event.edit("🖤 جاري البحث عن شعر فصيح...")
         entity = await tg.get_entity(username)
+        recent = []
+        async for post in tg.iter_messages(entity, limit=40):
+            recent.append(post)
+
+        # iter_messages يعيد الأحدث أولاً؛ نتجاوز أول 20 رسالة.
+        scan_posts = recent[20:40]
+        candidates = []
+        for post in scan_posts:
+            raw = (getattr(post, "message", None) or "").strip()
+            if not raw or getattr(post, "action", None):
+                continue
+            lines = [line.strip() for line in raw.splitlines() if line.strip()]
+            # استبعاد البيت القصير أو المنشور الذي لا يحتوي قصيدة كاملة.
+            if len(raw) < 100 or len(lines) < 3:
+                continue
+            if _has_iraqi_dialect_markers(raw):
+                continue
+            candidates.append((int(post.id), raw))
+
+        if not candidates:
+            return await event.edit("🖤 لم أجد قصيدة فصيحة كاملة ضمن المنشورات المحددة.")
+
         state = load_json(POETRY_STATE_FILE, {})
         if not isinstance(state, dict):
             state = {}
         if state.get("classifier_version") != CLASSIFIER_VERSION:
-            state = {"classifier_version": CLASSIFIER_VERSION, "last_scanned_id": 0, "next_index": 0, "poems": [], "used_ids": [], "classifications": {}}
-        state.setdefault("last_scanned_id", 0)
-        state.setdefault("next_index", 0)
-        state.setdefault("poems", [])
+            state = {"classifier_version": CLASSIFIER_VERSION, "used_ids": [], "classifications": {}}
         state.setdefault("used_ids", [])
         state.setdefault("classifications", {})
         if not isinstance(state["classifications"], dict):
             state["classifications"] = {}
-        old_poems = state["poems"] if isinstance(state["poems"], list) else []
-        old_index = max(0, int(state.get("next_index", 0) or 0))
-        old_sent_ids = {int(item.get("id", 0)) for item in old_poems[:old_index] if isinstance(item, dict)}
-        had_errors = False
-        newest_id = 0
-        # Scan from the oldest post, not from a possibly stale cursor.
-        async for post in tg.iter_messages(entity, reverse=True):
-            message_id = int(getattr(post, "id", 0) or 0)
-            if not message_id:
-                continue
-            newest_id = max(newest_id, message_id)
-            raw = (getattr(post, "message", None) or "").strip()
-            if not raw:
-                continue
-            key = str(message_id)
-            label = state["classifications"].get(key)
-            if label not in ("FUSHA", "IRAQI", "OTHER"):
-                label = await _classify_poetry_post(raw)
-                if label == "ERROR":
-                    had_errors = True
-                    print("POETRY SCAN PAUSED: classifier unavailable at post", message_id)
-                    # Never send a post whose language classification failed.
-                    break
-                state["classifications"][key] = label
-                state["last_scanned_id"] = message_id
-                state["classifier_version"] = CLASSIFIER_VERSION
-                save_json(POETRY_STATE_FILE, state)
-        eligible = []
-        async for post in tg.iter_messages(entity, reverse=True):
-            message_id = int(getattr(post, "id", 0) or 0)
-            if not message_id or state["classifications"].get(str(message_id)) != "FUSHA":
-                continue
-            raw = (getattr(post, "message", None) or "").strip()
-            if raw:
-                eligible.append({"id": message_id, "text": raw})
-        state["poems"] = eligible
-        state["next_index"] = sum(1 for item in eligible if int(item["id"]) in old_sent_ids)
-        state["last_scanned_id"] = newest_id
-        state["classifier_version"] = CLASSIFIER_VERSION
+
+        pending = [(pid, text) for pid, text in candidates
+                   if state["classifications"].get(str(pid)) not in ("FUSHA", "IRAQI", "OTHER")]
+        if pending:
+            numbered = "\\n\\n".join(
+                f"POST {i}:\\n{text[:1800]}" for i, (_, text) in enumerate(pending, 1)
+            )
+            prompt = (
+                "صنّف كل منشور على حدة. أعد سطراً واحداً بصيغة FUSHA: أرقام المنشورات الفصيحة فقط. "
+                "اعتبر الشعر العراقي والعامي IRAQI واستبعده، والنثر OTHER. "
+                "لا تعتبر البيت القصير أو العامي فصيحاً. لا تكتب أي شرح.\\n\\n" + numbered
+            )
+            answer = await ai_completion(
+                prompt,
+                "أنت مدقق لغة عربية متخصص في تمييز الشعر الفصيح عن الشعر العراقي والعامي."
+            )
+            if not answer or answer.strip().startswith("⚠️"):
+                print("POETRY BATCH CLASSIFIER UNAVAILABLE:", answer)
+                return await event.edit("⚠️ تعذّر تصنيف الشعر حالياً بسبب ضغط خدمة الذكاء. جرّب بعد قليل.")
+            match = re.search(r"FUSHA\\s*:\\s*([0-9,، ]*)", answer, re.I)
+            fusha_indexes = set()
+            if match:
+                fusha_indexes = {
+                    int(x) for x in re.findall(r"\\d+", match.group(1))
+                    if 1 <= int(x) <= len(pending)
+                }
+            for i, (pid, _) in enumerate(pending, 1):
+                state["classifications"][str(pid)] = "FUSHA" if i in fusha_indexes else "OTHER"
+            save_json(POETRY_STATE_FILE, state)
+
+        used = {int(x) for x in state.get("used_ids", [])}
+        eligible = [(pid, raw) for pid, raw in candidates
+                    if state["classifications"].get(str(pid)) == "FUSHA" and pid not in used]
+        if not eligible:
+            return await event.edit("🖤 انتهت القصائد الفصيحة الجديدة في المنشورات المحددة، ولن أكرر ما أرسلته.")
+
+        # الأحدث من القصائد المؤهلة أولاً، مع منع تكرار أي منشور.
+        selected_id, original = eligible[0]
+        state["used_ids"] = (list(state.get("used_ids", [])) + [selected_id])[-500:]
         save_json(POETRY_STATE_FILE, state)
-        index = int(state.get("next_index", 0) or 0)
-        if index >= len(eligible):
-            if had_errors:
-                return await event.edit("⚠️ توقف فحص الشعر مؤقتاً لأن خدمة التصنيف لم تستجب (قد يكون حد الطلبات 429). لم أرسل أي منشور غير متأكد من فصاحته. جرّب لاحقاً.")
-            return await event.edit("🖤 فحصت منشورات القناة ولم أجد قصيدة فصيحة غير مرسلة. تم تجاوز الشعر العراقي والعامي.")
-        selected = eligible[index]
-        state["next_index"] = index + 1
-        state.setdefault("used_ids", []).append(int(selected["id"]))
-        save_json(POETRY_STATE_FILE, state)
-        original = selected["text"]
+
         chunks = [original[i:i + 3500] for i in range(0, len(original), 3500)]
         await event.edit(chunks[0], parse_mode=None)
         for chunk in chunks[1:]:
@@ -2108,63 +2118,6 @@ async def _send_official_poetry(event):
     except Exception as exc:
         print("OFFICIAL POETRY CHANNEL ERROR:", exc)
         await event.edit("⚠️ تعذّر قراءة قناة الشعر. تأكد أن الحساب مشترك في القناة وأنه يستطيع فتحها.")
-
-async def _get_channel_inspiration(category):
-    channels = FUN_CHANNELS.get(category, [])
-    if not channels:
-        return None
-    used_key = f"channel_{category}"
-    used = set(str(x) for x in fun_history.get(used_key, []))
-    candidates = []
-    for username in channels:
-        try:
-            entity = await tg.get_entity(username)
-            async for post in tg.iter_messages(entity, limit=80):
-                raw = (getattr(post, "message", None) or "").strip()
-                if not raw or len(raw) < 15:
-                    continue
-                if getattr(post, "action", None):
-                    continue
-                post_id = f"{username}:{post.id}"
-                if post_id in used:
-                    continue
-                candidates.append((post_id, raw))
-        except Exception as exc:
-            print("FUN CHANNEL READ ERROR:", username, exc)
-    if not candidates:
-        return None
-    selected_id, selected_text = random.choice(candidates)
-    used.add(selected_id)
-    fun_history[used_key] = list(used)[-300:]
-    save_json(FUN_HISTORY_FILE, fun_history)
-    return selected_text
-
-async def _channel_fun(event, category, instruction=None):
-    await event.edit("🖤 أبحث في منشورات القنوات...")
-    source = await _get_channel_inspiration(category)
-    if not source:
-        return await event.edit("⚠️ لم أجد منشوراً جديداً في قنوات هذا القسم، أو تعذّر الوصول إليها.")
-    # نقل حرفي كامل: لا تلخيص ولا إعادة صياغة ولا استدعاء للذكاء الاصطناعي.
-    chunks = [source[i:i + 3500] for i in range(0, len(source), 3500)]
-    await event.edit(chunks[0], parse_mode=None)
-    for chunk in chunks[1:]:
-        await tg.send_message(event.chat_id, chunk, parse_mode=None)
-
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.نكتة$"))
-async def ai_joke(event):
-    await _channel_fun(event, "joke")
-
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.حزن$"))
-async def sad_phrase(event):
-    await _channel_fun(event, "sad")
-
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.عتاب$"))
-async def reproach_phrase(event):
-    await _channel_fun(event, "sad")
-
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.كبرياء$"))
-async def pride_phrase(event):
-    await _channel_fun(event, "pride")
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.(شعر|بيت شعر)$"))
 async def classical_poetry(event):
