@@ -729,7 +729,7 @@ async def _username_search(event, length):
         lines.append("✅ اكتمل تسلسل جميع الاحتمالات لهذا النوع.")
     else:
         lines.append("للمتابعة دون تكرار، أعد كتابة الأمر نفسه. التالي من رقم: " + str(cursor + 1))
-    await event.edit("\\n".join(lines))
+    await event.edit("\n".join(lines))
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.بحث يوزر ثلاثي$"))
 async def search_three_char_username(event):
@@ -2087,14 +2087,14 @@ async def _send_official_poetry(event):
                 continue
 
             numbered = "\n\n".join(
-                f"POST {i}:\\n{text[:1800]}" for i, (_, text) in enumerate(batch, 1)
+                f"POST {i}:\n{text[:1800]}" for i, (_, text) in enumerate(batch, 1)
             )
             prompt = (
                 "صنّف كل منشور على حدة. أعد النتيجة بهذا الشكل فقط: "
-                "FUSHA: أرقام المنشورات الفصيحة مفصولة بفواصل.\\n"
+                "FUSHA: أرقام المنشورات الفصيحة مفصولة بفواصل.\n"
                 "الشعر الفصيح قد يكون قصيدة طويلة أو بيتاً واحداً قصيراً، "
                 "ولا تستبعده بسبب قصره. استبعد الشعر العراقي والعامي فقط، "
-                "واستبعد النثر والإعلانات.\\n\\n" + numbered
+                "واستبعد النثر والإعلانات.\n\n" + numbered
             )
             answer = await ai_completion(
                 prompt,
@@ -2104,12 +2104,12 @@ async def _send_official_poetry(event):
                 print("POETRY BATCH CLASSIFIER UNAVAILABLE:", answer)
                 return await event.edit("⚠️ تعذّر فحص القناة بسبب ضغط خدمة الذكاء. جرّب بعد قليل؛ لم أعلّم المنشورات غير المفحوصة كمرفوضة.")
 
-            match = re.search(r"FUSHA\\s*[:：]\\s*([0-9,، ؛; ]*)", answer, re.I)
+            match = re.search(r"FUSHA\s*[:：]\s*([0-9,، ؛; ]*)", answer, re.I)
             if not match:
                 print("POETRY CLASSIFIER UNRECOGNIZED RESPONSE:", answer)
                 return await event.edit("⚠️ لم أفهم نتيجة تصنيف المنشورات. لم أغيّر حالة المنشورات غير المفحوصة.")
             indexes = {
-                int(x) for x in re.findall(r"\\d+", match.group(1))
+                int(x) for x in re.findall(r"\d+", match.group(1))
                 if 1 <= int(x) <= len(batch)
             }
             for i, (pid, _) in enumerate(batch, 1):
@@ -2126,12 +2126,12 @@ async def _send_official_poetry(event):
         # افحص آخر دفعة إذا كان عدد المنشورات ليس من مضاعفات 12.
         if selected is None and batch:
             numbered = "\n\n".join(
-                f"POST {i}:\\n{text[:1800]}" for i, (_, text) in enumerate(batch, 1)
+                f"POST {i}:\n{text[:1800]}" for i, (_, text) in enumerate(batch, 1)
             )
             prompt = (
                 "صنّف كل منشور على حدة. أعد النتيجة بهذا الشكل فقط: "
                 "FUSHA: أرقام المنشورات الفصيحة مفصولة بفواصل. "
-                "اقبل البيت الفصيح القصير، واستبعد العراقي والعامي والنثر.\\n\\n" + numbered
+                "اقبل البيت الفصيح القصير، واستبعد العراقي والعامي والنثر.\n\n" + numbered
             )
             answer = await ai_completion(
                 prompt,
@@ -2139,11 +2139,11 @@ async def _send_official_poetry(event):
             )
             if not answer or answer.strip().startswith("⚠️"):
                 return await event.edit("⚠️ تعذّر فحص آخر دفعة بسبب ضغط خدمة الذكاء. جرّب بعد قليل.")
-            match = re.search(r"FUSHA\\s*[:：]\\s*([0-9,، ؛; ]*)", answer, re.I)
+            match = re.search(r"FUSHA\s*[:：]\s*([0-9,، ؛; ]*)", answer, re.I)
             if not match:
                 return await event.edit("⚠️ لم أفهم نتيجة تصنيف آخر دفعة؛ لم أعتبرها مرفوضة.")
             indexes = {
-                int(x) for x in re.findall(r"\\d+", match.group(1))
+                int(x) for x in re.findall(r"\d+", match.group(1))
                 if 1 <= int(x) <= len(batch)
             }
             for i, (pid, _) in enumerate(batch, 1):
