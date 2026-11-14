@@ -2033,80 +2033,131 @@ async def _classify_poetry_post(raw):
 
 
 async def _send_official_poetry(event):
-    # تجاهل أحدث 20 رسالة، وافحص العشرين التي تسبقها فقط.
+    # افحص سجل القناة كله على دفعات، ولا تكرر أي منشور سبق إرساله.
     username = "deved_iraq"
-    CLASSIFIER_VERSION = 3
+    CLASSIFIER_VERSION = 4
     try:
-        await event.edit("🖤 جاري البحث عن شعر فصيح...")
+        await event.edit("🖤 جاري البحث في سجل قناة الشعر...")
         entity = await tg.get_entity(username)
-        recent = []
-        async for post in tg.iter_messages(entity, limit=40):
-            recent.append(post)
-
-        # iter_messages يعيد الأحدث أولاً؛ نتجاوز أول 20 رسالة.
-        scan_posts = recent[20:40]
-        candidates = []
-        for post in scan_posts:
-            raw = (getattr(post, "message", None) or "").strip()
-            if not raw or getattr(post, "action", None):
-                continue
-            # اقبل القصائد الطويلة والقصيرة، حتى لو كانت بيتاً واحداً.
-            if len(raw) < 8:
-                continue
-            if _has_iraqi_dialect_markers(raw):
-                continue
-            candidates.append((int(post.id), raw))
-
-        if not candidates:
-            return await event.edit("🖤 لم أجد قصيدة فصيحة كاملة ضمن المنشورات المحددة.")
 
         state = load_json(POETRY_STATE_FILE, {})
         if not isinstance(state, dict):
             state = {}
         if state.get("classifier_version") != CLASSIFIER_VERSION:
-            state = {"classifier_version": CLASSIFIER_VERSION, "used_ids": [], "classifications": {}}
+            # احتفظ بمعرّفات المنشورات المرسلة، لكن أعد تصنيف المنشورات القديمة
+            # لأن التصنيف السابق كان محدوداً وقد يكون استبعد منشورات فصيحة.
+            state = {
+                "classifier_version": CLASSIFIER_VERSION,
+                "used_ids": state.get("used_ids", []),
+                "classifications": {}
+            }
         state.setdefault("used_ids", [])
         state.setdefault("classifications", {})
         if not isinstance(state["classifications"], dict):
             state["classifications"] = {}
 
-        pending = [(pid, text) for pid, text in candidates
-                   if state["classifications"].get(str(pid)) not in ("FUSHA", "IRAQI", "OTHER")]
-        if pending:
+        used = {int(x) for x in state.get("used_ids", [])}
+        batch = []
+        selected = None
+        scanned = 0
+
+        # limit=0 يعني قراءة كامل سجل القناة، والأحدث يأتي أولاً.
+        async for post in tg.iter_messages(entity, limit=0):
+            raw = (getattr(post, "message", None) or "").strip()
+            if not raw or getattr(post, "action", None):
+                continue
+            if len(raw) < 8 or _has_iraqi_dialect_markers(raw):
+                continue
+
+            pid = int(post.id)
+            scanned += 1
+
+            # تجاهل المنشورات المرسلة سابقاً، واستفد من التصنيفات المحفوظة.
+            if pid in used:
+                continue
+            cached = state["classifications"].get(str(pid))
+            if cached == "FUSHA":
+                selected = (pid, raw)
+                break
+            if cached in ("IRAQI", "OTHER"):
+                continue
+
+            batch.append((pid, raw))
+            if len(batch) < 12:
+                continue
+
             numbered = "\n\n".join(
-                f"POST {i}:\n{text[:1800]}" for i, (_, text) in enumerate(pending, 1)
+                f"POST {i}:\\n{text[:1800]}" for i, (_, text) in enumerate(batch, 1)
             )
             prompt = (
-                "صنّف كل منشور على حدة. أعد سطراً واحداً بصيغة FUSHA: أرقام المنشورات الفصيحة فقط. "
-                "اعتبر الشعر العراقي والعامي IRAQI واستبعده، والنثر OTHER. "
-                "قد يكون الشعر الفصيح قصيدة طويلة أو بيتاً واحداً قصيراً؛ لا تستبعده بسبب قصره. استبعد العامي والعراقي فقط. لا تكتب أي شرح.\n\n" + numbered
+                "صنّف كل منشور على حدة. أعد النتيجة بهذا الشكل فقط: "
+                "FUSHA: أرقام المنشورات الفصيحة مفصولة بفواصل.\\n"
+                "الشعر الفصيح قد يكون قصيدة طويلة أو بيتاً واحداً قصيراً، "
+                "ولا تستبعده بسبب قصره. استبعد الشعر العراقي والعامي فقط، "
+                "واستبعد النثر والإعلانات.\\n\\n" + numbered
             )
             answer = await ai_completion(
                 prompt,
-                "أنت مدقق لغة عربية متخصص في تمييز الشعر الفصيح عن الشعر العراقي والعامي."
+                "أنت مدقق لغة عربية. ميّز الشعر العربي الفصيح من العراقي والعامي بدقة."
             )
             if not answer or answer.strip().startswith("⚠️"):
                 print("POETRY BATCH CLASSIFIER UNAVAILABLE:", answer)
-                return await event.edit("⚠️ تعذّر تصنيف الشعر حالياً بسبب ضغط خدمة الذكاء. جرّب بعد قليل.")
-            match = re.search(r"FUSHA\s*:\s*([0-9,، ]*)", answer, re.I)
-            fusha_indexes = set()
-            if match:
-                fusha_indexes = {
-                    int(x) for x in re.findall(r"\d+", match.group(1))
-                    if 1 <= int(x) <= len(pending)
-                }
-            for i, (pid, _) in enumerate(pending, 1):
-                state["classifications"][str(pid)] = "FUSHA" if i in fusha_indexes else "OTHER"
+                return await event.edit("⚠️ تعذّر فحص القناة بسبب ضغط خدمة الذكاء. جرّب بعد قليل؛ لم أعلّم المنشورات غير المفحوصة كمرفوضة.")
+
+            match = re.search(r"FUSHA\\s*[:：]\\s*([0-9,، ؛; ]*)", answer, re.I)
+            if not match:
+                print("POETRY CLASSIFIER UNRECOGNIZED RESPONSE:", answer)
+                return await event.edit("⚠️ لم أفهم نتيجة تصنيف المنشورات. لم أغيّر حالة المنشورات غير المفحوصة.")
+            indexes = {
+                int(x) for x in re.findall(r"\\d+", match.group(1))
+                if 1 <= int(x) <= len(batch)
+            }
+            for i, (pid, _) in enumerate(batch, 1):
+                state["classifications"][str(pid)] = "FUSHA" if i in indexes else "OTHER"
             save_json(POETRY_STATE_FILE, state)
 
-        used = {int(x) for x in state.get("used_ids", [])}
-        eligible = [(pid, raw) for pid, raw in candidates
-                    if state["classifications"].get(str(pid)) == "FUSHA" and pid not in used]
-        if not eligible:
-            return await event.edit("🖤 انتهت القصائد الفصيحة الجديدة في المنشورات المحددة، ولن أكرر ما أرسلته.")
+            eligible = [(pid, raw) for i, (pid, raw) in enumerate(batch, 1)
+                        if i in indexes and pid not in used]
+            if eligible:
+                selected = eligible[0]
+                break
+            batch = []
 
-        # الأحدث من القصائد المؤهلة أولاً، مع منع تكرار أي منشور.
-        selected_id, original = eligible[0]
+        # افحص آخر دفعة إذا كان عدد المنشورات ليس من مضاعفات 12.
+        if selected is None and batch:
+            numbered = "\n\n".join(
+                f"POST {i}:\\n{text[:1800]}" for i, (_, text) in enumerate(batch, 1)
+            )
+            prompt = (
+                "صنّف كل منشور على حدة. أعد النتيجة بهذا الشكل فقط: "
+                "FUSHA: أرقام المنشورات الفصيحة مفصولة بفواصل. "
+                "اقبل البيت الفصيح القصير، واستبعد العراقي والعامي والنثر.\\n\\n" + numbered
+            )
+            answer = await ai_completion(
+                prompt,
+                "أنت مدقق لغة عربية متخصص في تمييز الشعر الفصيح عن العراقي والعامي."
+            )
+            if not answer or answer.strip().startswith("⚠️"):
+                return await event.edit("⚠️ تعذّر فحص آخر دفعة بسبب ضغط خدمة الذكاء. جرّب بعد قليل.")
+            match = re.search(r"FUSHA\\s*[:：]\\s*([0-9,، ؛; ]*)", answer, re.I)
+            if not match:
+                return await event.edit("⚠️ لم أفهم نتيجة تصنيف آخر دفعة؛ لم أعتبرها مرفوضة.")
+            indexes = {
+                int(x) for x in re.findall(r"\\d+", match.group(1))
+                if 1 <= int(x) <= len(batch)
+            }
+            for i, (pid, _) in enumerate(batch, 1):
+                state["classifications"][str(pid)] = "FUSHA" if i in indexes else "OTHER"
+            save_json(POETRY_STATE_FILE, state)
+            eligible = [(pid, raw) for i, (pid, raw) in enumerate(batch, 1)
+                        if i in indexes and pid not in used]
+            if eligible:
+                selected = eligible[0]
+
+        if selected is None:
+            return await event.edit("🖤 فحصت سجل القناة ولم أجد منشوراً فصيحاً جديداً غير مُرسل.")
+
+        selected_id, original = selected
         state["used_ids"] = (list(state.get("used_ids", [])) + [selected_id])[-500:]
         save_json(POETRY_STATE_FILE, state)
 
