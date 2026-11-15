@@ -1984,6 +1984,70 @@ FUN_CHANNELS = {
     "poetry": ["deved_iraq"],
 }
 
+# ------------------------- Copy posts from the selected channels -------------------------
+
+FUN_CHANNEL_STATE_FILE = "fun_channel_state.json"
+
+async def _send_channel_fun_post(event, category):
+    sources = FUN_CHANNELS.get(category, [])
+    state = load_json(FUN_CHANNEL_STATE_FILE, {})
+    if not isinstance(state, dict):
+        state = {}
+    category_state = state.setdefault(category, {})
+    failures = []
+
+    await event.edit("🖤 جاري البحث عن منشور جديد...")
+    for username in sources:
+        try:
+            entity = await tg.get_entity(username)
+            used = {int(x) for x in category_state.get(username, [])}
+            selected = None
+
+            async for post in tg.iter_messages(entity, limit=300):
+                post_id = int(post.id)
+                raw = (getattr(post, "message", None) or "").strip()
+                if not raw or getattr(post, "action", None) or post_id in used:
+                    continue
+                selected = (post_id, raw)
+                break
+
+            if selected is None:
+                continue
+
+            post_id, original = selected
+            category_state[username] = (list(category_state.get(username, [])) + [post_id])[-1000:]
+            save_json(FUN_CHANNEL_STATE_FILE, state)
+
+            chunks = [original[i:i + 3500] for i in range(0, len(original), 3500)]
+            await event.edit(chunks[0], parse_mode=None)
+            for chunk in chunks[1:]:
+                await tg.send_message(event.chat_id, chunk, parse_mode=None)
+            return
+        except Exception as exc:
+            failures.append(f"{username}: {exc}")
+            print(f"FUN CHANNEL ERROR ({category}/{username}):", exc)
+
+    if failures:
+        await event.edit("⚠️ تعذّر الوصول إلى بعض قنوات المصدر. تأكد أن الحساب مشترك فيها وأن القنوات متاحة.")
+    else:
+        await event.edit("🖤 لا توجد منشورات جديدة غير مرسلة في قنوات هذا الأمر.")
+
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.نكتة$"))
+async def channel_joke(event):
+    await _send_channel_fun_post(event, "joke")
+
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.حزن$"))
+async def channel_sad_post(event):
+    await _send_channel_fun_post(event, "sad")
+
+
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.كبرياء$"))
+async def channel_pride_post(event):
+    await _send_channel_fun_post(event, "pride")
+
+
 POETRY_STATE_FILE = "official_poetry_state.json"
 
 def _has_iraqi_dialect_markers(value):
