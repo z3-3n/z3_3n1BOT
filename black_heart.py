@@ -2033,17 +2033,17 @@ async def _send_channel_fun_post(event, category):
         await event.edit("🖤 لا توجد منشورات جديدة غير مرسلة في قنوات هذا الأمر.")
 
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.نكتة$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.نكتة$"))
 async def channel_joke(event):
     await _send_channel_fun_post(event, "joke")
 
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.حزن$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.حزن$"))
 async def channel_sad_post(event):
     await _send_channel_fun_post(event, "sad")
 
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.كبرياء$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.كبرياء$"))
 async def channel_pride_post(event):
     await _send_channel_fun_post(event, "pride")
 
