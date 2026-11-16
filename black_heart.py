@@ -1993,8 +1993,14 @@ async def _send_channel_fun_post(event, category):
     state = load_json(FUN_CHANNEL_STATE_FILE, {})
     if not isinstance(state, dict):
         state = {}
-    category_state = state.setdefault(category, {})
+    category_state = state.get(category, {})
+    if not isinstance(category_state, dict):
+        category_state = {}
+    state[category] = category_state
     failures = []
+
+    if not sources:
+        return await event.edit("⚠️ لم تُضبط قنوات هذا الأمر بعد.")
 
     await event.edit("🖤 جاري البحث عن منشور جديد...")
     for username in sources:
@@ -2015,13 +2021,14 @@ async def _send_channel_fun_post(event, category):
                 continue
 
             post_id, original = selected
-            category_state[username] = (list(category_state.get(username, [])) + [post_id])[-1000:]
-            save_json(FUN_CHANNEL_STATE_FILE, state)
-
             chunks = [original[i:i + 3500] for i in range(0, len(original), 3500)]
             await event.edit(chunks[0], parse_mode=None)
             for chunk in chunks[1:]:
                 await tg.send_message(event.chat_id, chunk, parse_mode=None)
+
+            # لا تسجل المنشور كمُرسل إلا بعد نجاح إرساله كاملاً.
+            category_state[username] = (list(category_state.get(username, [])) + [post_id])[-1000:]
+            save_json(FUN_CHANNEL_STATE_FILE, state)
             return
         except Exception as exc:
             failures.append(f"{username}: {exc}")
@@ -2222,13 +2229,14 @@ async def _send_official_poetry(event):
             return await event.edit("🖤 فحصت سجل القناة ولم أجد منشوراً فصيحاً جديداً غير مُرسل.")
 
         selected_id, original = selected
-        state["used_ids"] = (list(state.get("used_ids", [])) + [selected_id])[-500:]
-        save_json(POETRY_STATE_FILE, state)
-
         chunks = [original[i:i + 3500] for i in range(0, len(original), 3500)]
         await event.edit(chunks[0], parse_mode=None)
         for chunk in chunks[1:]:
             await tg.send_message(event.chat_id, chunk, parse_mode=None)
+
+        # احتفظ بالمعرّف بعد اكتمال الإرسال حتى لا تضيع القصيدة عند فشل الإرسال.
+        state["used_ids"] = (list(state.get("used_ids", [])) + [selected_id])[-500:]
+        save_json(POETRY_STATE_FILE, state)
     except Exception as exc:
         print("OFFICIAL POETRY CHANNEL ERROR:", exc)
         await event.edit("⚠️ تعذّر قراءة قناة الشعر. تأكد أن الحساب مشترك في القناة وأنه يستطيع فتحها.")
