@@ -2073,10 +2073,10 @@ def _save_fun_request_memory(value):
 
 def _is_fun_continuation(value):
     text_value = (value or "").casefold().strip()
-    text_value = re.sub(r"[\\u064B-\\u065F\\u0670ـ]", "", text_value)
+    text_value = re.sub(r"[\u064B-\u065F\u0670ـ]", "", text_value)
     text_value = re.sub(r"[إأآٱ]", "ا", text_value)
-    text_value = re.sub(r"[^\\w\\s]", " ", text_value)
-    text_value = re.sub(r"\\s+", " ", text_value).strip()
+    text_value = re.sub(r"[^\w\s]", " ", text_value)
+    text_value = re.sub(r"\s+", " ", text_value).strip()
     phrases = (
         "زيد", "زيد واحده", "زيد حبه", "زيد حبة", "زيد وحده", "زيد كمان",
         "زيد بعد", "واحده ثانيه", "حبه ثانيه", "كمان", "بعد واحده",
