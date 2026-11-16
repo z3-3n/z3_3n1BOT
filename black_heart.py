@@ -1058,6 +1058,13 @@ async def incoming_handler(event):
     if not text_in:
         return
 
+    # إذا طلب الشخص نكتة أو محتوى حزن/كبرياء، انسخ منشوراً أصلياً
+    # من قنوات المصدر نفسها بدلاً من توليد نص من الذكاء الاصطناعي.
+    fun_category = _detect_fun_channel_request(text_in)
+    if fun_category:
+        await _send_channel_fun_post(event, fun_category, incoming=True)
+        return
+
     chat_key = str(event.chat_id)
     first_message = chat_key not in welcomed
     system = SYSTEM_QASF if settings.get("qasf", False) else (
@@ -2028,11 +2035,50 @@ def _is_clean_fun_post(category, raw):
         return False
     return True
 
+# ------------------------- Natural-language requests for channel content -------------------------
+
+def _detect_fun_channel_request(value):
+    """Detect explicit requests for jokes, sadness messages, or pride posts."""
+    text_value = (value or "").casefold()
+    text_value = re.sub(r"[\\u064B-\\u065F\\u0670ـ]", "", text_value)
+    text_value = re.sub(r"[إأآٱ]", "ا", text_value)
+    text_value = re.sub(r"\\s+", " ", text_value).strip()
+
+    # Require a request-like expression so ordinary discussion about sadness,
+    # jokes, or pride is not mistaken for a content request.
+    request_words = (
+        "جيب", "هات", "اعطني", "اعطيني", "ابي", "ابغى", "اريد", "ودي",
+        "ممكن", "ارسل", "رسل", "اعرض", "ورني", "عطني", "قول", "احكي",
+        "اكتب", "جيبلي", "هاتلي", "اعطنا", "نريد"
+    )
+    content_words = (
+        "حاله", "حالات", "رساله", "رسائل", "كلام", "عباره", "عبارات",
+        "منشور", "بوست", "نص", "شي", "شيء", "واحده", "واحد", "مقطع"
+    )
+    has_request = any(word in text_value for word in request_words)
+    has_content = any(word in text_value for word in content_words)
+
+    joke_terms = ("نكت", "نكته", "طرافه", "مضحك", "تضحك", "اضحكني")
+    sad_terms = ("حزن", "حزين", "حزينه", "حزينة", "وجع", "فراق", "خذلان", "اشتياق")
+    pride_terms = ("كبرياء", "كرامه", "عزه", "هيبه", "ثقه بالنفس", "عزة النفس")
+
+    if any(term in text_value for term in joke_terms) and (has_request or has_content):
+        return "joke"
+    if any(term in text_value for term in sad_terms) and (has_request or has_content):
+        return "sad"
+    if any(term in text_value for term in pride_terms) and (has_request or has_content):
+        return "pride"
+    # Common direct phrasings such as "اضحكني" and "ابي شيء يضحك".
+    if "اضحكني" in text_value or "ضحكني" in text_value:
+        return "joke"
+    return None
+
+
 # ------------------------- Copy posts from the selected channels -------------------------
 
 FUN_CHANNEL_STATE_FILE = "fun_channel_state.json"
 
-async def _send_channel_fun_post(event, category):
+async def _send_channel_fun_post(event, category, incoming=False):
     sources = FUN_CHANNELS.get(category, [])
     state = load_json(FUN_CHANNEL_STATE_FILE, {})
     if not isinstance(state, dict):
@@ -2046,7 +2092,8 @@ async def _send_channel_fun_post(event, category):
     if not sources:
         return await event.edit("⚠️ لم تُضبط قنوات هذا الأمر بعد.")
 
-    await event.edit("🖤 جاري البحث عن منشور جديد...")
+    if not incoming:
+        await event.edit("🖤 جاري البحث عن منشور جديد...")
     for username in sources:
         try:
             entity = await tg.get_entity(username)
@@ -2071,7 +2118,10 @@ async def _send_channel_fun_post(event, category):
 
             post_id, original = selected
             chunks = [original[i:i + 3500] for i in range(0, len(original), 3500)]
-            await event.edit(chunks[0], parse_mode=None)
+            if incoming:
+                await event.reply(chunks[0], parse_mode=None)
+            else:
+                await event.edit(chunks[0], parse_mode=None)
             for chunk in chunks[1:]:
                 await tg.send_message(event.chat_id, chunk, parse_mode=None)
 
@@ -2084,9 +2134,13 @@ async def _send_channel_fun_post(event, category):
             print(f"FUN CHANNEL ERROR ({category}/{username}):", exc)
 
     if failures:
-        await event.edit("⚠️ تعذّر الوصول إلى بعض قنوات المصدر. تأكد أن الحساب مشترك فيها وأن القنوات متاحة.")
+        message = "⚠️ تعذّر الوصول إلى بعض قنوات المصدر. تأكد أن الحساب مشترك فيها وأن القنوات متاحة."
     else:
-        await event.edit("🖤 لا توجد منشورات جديدة غير مرسلة في قنوات هذا الأمر.")
+        message = "🖤 لا توجد منشورات جديدة غير مرسلة في قنوات هذا الأمر."
+    if incoming:
+        await event.reply(message)
+    else:
+        await event.edit(message)
 
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.نكتة$"))
