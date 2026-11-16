@@ -139,7 +139,7 @@ MENU_PAGES[1] += "\n`.رفع مطور` بالرد - إضافة مطور\n`.حذ�
 print("🖤 BLACK HEART profile, photo, art and fun extensions loaded")
 
 
-@tg.on(events.NewMessage(outgoing=True, pattern=r"^\\.صورة\\s+(\\d+)$"))
+@tg.on(events.NewMessage(outgoing=True, pattern=r"^\.صورة\s+(\d+)$"))
 async def blackheart_numbered_photo(event):
     if not event.is_reply:
         return await event.edit("↩️ رد على رسالة الشخص ثم أرسل: .صورة 1")
@@ -168,4 +168,4 @@ async def blackheart_numbered_photo(event):
         print("NUMBERED PROFILE PHOTO ERROR:", exc)
         await event.edit("❌ تعذّر جلب الصورة المطلوبة.")
 
-MENU_PAGES[4] += "\\n`.صورة رقم` بالرد - جلب صورة الملف الشخصي حسب ترتيبها (1 الأحدث)\\n"
+MENU_PAGES[4] += "\n`.صورة رقم` بالرد - جلب صورة الملف الشخصي حسب ترتيبها (1 الأحدث)\n"
