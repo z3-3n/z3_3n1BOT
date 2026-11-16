@@ -1979,10 +1979,46 @@ async def ai_wisdom(event):
 # Channel sources. The user's official classical-poetry channel is deved_iraq.
 FUN_CHANNELS = {
     "joke": ["YemeniCocktail", "ggbbaaa2023"],
-    "sad": ["C_P_B", "mshaeear", "iktipas_e"],
-    "pride": ["mshaeear", "WWISS0"],
+    "sad": ["Mazreading"],
+    "pride": ["WWISS0"],
     "poetry": ["deved_iraq"],
 }
+
+# استبعاد الإعلانات والكلام الجانبي قبل اختيار المنشور.
+_FUN_AD_MARKERS = (
+    "إعلان", "اعلان", "إعلانات", "اعلانات", "للتواصل", "للاشتراك",
+    "اشترك", "انضم إلينا", "انضم الينا", "تابعونا", "تابع القناة",
+    "قناتنا الثانية", "حسابنا", "واتساب", "خصم", "تخفيض", "عرض خاص",
+    "متجر", "للطلب", "راسلنا", "للحجز", "رابط القناة", "رابط حساب"
+)
+_FUN_TOPIC_MARKERS = {
+    "sad": (
+        "حزن", "حزين", "حزينة", "وجع", "ألم", "الم", "فراق", "غياب",
+        "اشتياق", "شوق", "خذلان", "خيبة", "دمعة", "دموع", "بكاء",
+        "وحدة", "وحيد", "رحيل", "فقد", "قلب", "انكسار", "كسر",
+        "تعب", "صمت", "حرمان", "حنين", "جرح", "موجوع", "悲"
+    ),
+    "pride": (
+        "كبرياء", "كرامة", "عزة", "عزّة", "هيبة", "ثقة", "نفسي",
+        "قدري", "قدري", "مقامي", "مقام", "عزيز", "أعتز", "اعتز",
+        "لا أنحني", "لا انحني", "لا أقبل", "لا اقبل", "أكتفي",
+        "اكتفي", "أستغني", "استغني", "غرور", "احترامي", "احترام"
+    ),
+}
+
+def _is_clean_fun_post(category, raw):
+    text_value = (raw or "").strip()
+    if len(text_value) < 25 or not re.search(r"[\\u0600-\\u06FF]", text_value):
+        return False
+    lowered = text_value.lower()
+    if re.search(r"(https?://|t\\.me/|www\\.)", lowered):
+        return False
+    if any(marker in lowered for marker in _FUN_AD_MARKERS):
+        return False
+    topic_markers = _FUN_TOPIC_MARKERS.get(category)
+    if topic_markers and not any(marker in lowered for marker in topic_markers):
+        return False
+    return True
 
 # ------------------------- Copy posts from the selected channels -------------------------
 
@@ -2012,7 +2048,12 @@ async def _send_channel_fun_post(event, category):
             async for post in tg.iter_messages(entity, limit=300):
                 post_id = int(post.id)
                 raw = (getattr(post, "message", None) or "").strip()
-                if not raw or getattr(post, "action", None) or post_id in used:
+                if (
+                    not raw
+                    or getattr(post, "action", None)
+                    or post_id in used
+                    or not _is_clean_fun_post(category, raw)
+                ):
                     continue
                 selected = (post_id, raw)
                 break
