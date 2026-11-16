@@ -2052,21 +2052,22 @@ def _detect_fun_channel_request(value):
         "اكتب", "جيبلي", "هاتلي", "اعطنا", "نريد"
     )
     content_words = (
-        "حاله", "حالات", "رساله", "رسائل", "كلام", "عباره", "عبارات",
+        "حاله", "حالات", "رساله", "رسائل", "رسايل", "كلام", "عباره", "عبارات",
         "منشور", "بوست", "نص", "شي", "شيء", "واحده", "واحد", "مقطع"
     )
     has_request = any(word in text_value for word in request_words)
     has_content = any(word in text_value for word in content_words)
+    short_request = len(text_value.split()) <= 3
 
     joke_terms = ("نكت", "نكته", "طرافه", "مضحك", "تضحك", "اضحكني")
     sad_terms = ("حزن", "حزين", "حزينه", "حزينة", "وجع", "فراق", "خذلان", "اشتياق")
     pride_terms = ("كبرياء", "كرامه", "عزه", "هيبه", "ثقه بالنفس", "عزة النفس")
 
-    if any(term in text_value for term in joke_terms) and (has_request or has_content):
+    if any(term in text_value for term in joke_terms) and (has_request or has_content or short_request):
         return "joke"
-    if any(term in text_value for term in sad_terms) and (has_request or has_content):
+    if any(term in text_value for term in sad_terms) and (has_request or has_content or short_request):
         return "sad"
-    if any(term in text_value for term in pride_terms) and (has_request or has_content):
+    if any(term in text_value for term in pride_terms) and (has_request or has_content or short_request):
         return "pride"
     # Common direct phrasings such as "اضحكني" and "ابي شيء يضحك".
     if "اضحكني" in text_value or "ضحكني" in text_value:
