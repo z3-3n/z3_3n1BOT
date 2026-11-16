@@ -563,6 +563,7 @@ async def mention_replied_user(event):
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.تشغيل ذكي$"))
 async def enable_ai(event):
+    # Local opt-in: this chat is allowed even while global AI is OFF.
     chat_id = str(event.chat_id)
     paused = {str(x) for x in settings.get("ai_paused_chats", [])}
     enabled = {str(x) for x in settings.get("ai_enabled_chats", [])}
@@ -572,9 +573,12 @@ async def enable_ai(event):
     settings["ai_enabled_chats"] = sorted(enabled)
     if "AI_PAUSED_CHATS" in globals():
         AI_PAUSED_CHATS.discard(chat_id)
-    save_json(SETTINGS_FILE, settings)
-    await event.edit("✅ تم تشغيل الذكاء في هذه المحادثة فقط، حتى لو كان متوقفاً عن الكل.")
-
+    # Preserve global OFF and persist this chat's local exception.
+    if "_save_ai_state" in globals():
+        _save_ai_state()
+    else:
+        save_json(SETTINGS_FILE, settings)
+    await event.edit("✅ تم السماح للذكاء في هذه المحادثة فقط. سيظل متوقفاً في بقية المحادثات.")
 
 @tg.on(events.NewMessage(outgoing=True, pattern=r"^\.ايقاف ذكي$"))
 async def disable_ai(event):
