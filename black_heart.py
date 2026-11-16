@@ -1058,12 +1058,31 @@ async def incoming_handler(event):
     if not text_in:
         return
 
-    # إذا طلب الشخص نكتة أو محتوى حزن/كبرياء، انسخ منشوراً أصلياً
-    # من قنوات المصدر نفسها بدلاً من توليد نص من الذكاء الاصطناعي.
+    # تذكّر آخر نوع محتوى طلبه كل شخص في كل محادثة، حتى يفهم "زيد".
     fun_category = _detect_fun_channel_request(text_in)
+    continuation = _is_fun_continuation(text_in)
+    fun_context = _load_fun_request_memory()
+    fun_memory_key = f"{event.chat_id}:{sender_id}"
+
     if fun_category:
+        fun_context[fun_memory_key] = {
+            "category": fun_category,
+            "updated_at": int(time.time())
+        }
+        _save_fun_request_memory(fun_context)
         await _send_channel_fun_post(event, fun_category, incoming=True)
         return
+
+    if continuation:
+        previous = fun_context.get(fun_memory_key, {})
+        previous_category = previous.get("category") if isinstance(previous, dict) else None
+        # Keep this short-term context for seven days, matching AI conversation memory.
+        if previous_category in ("joke", "sad", "pride") and int(time.time()) - int(previous.get("updated_at", 0)) <= 7 * 86400:
+            previous["updated_at"] = int(time.time())
+            fun_context[fun_memory_key] = previous
+            _save_fun_request_memory(fun_context)
+            await _send_channel_fun_post(event, previous_category, incoming=True)
+            return
 
     chat_key = str(event.chat_id)
     first_message = chat_key not in welcomed
@@ -2036,6 +2055,35 @@ def _is_clean_fun_post(category, raw):
     return True
 
 # ------------------------- Natural-language requests for channel content -------------------------
+
+FUN_REQUEST_MEMORY_FILE = "fun_request_memory.json"
+
+def _load_fun_request_memory():
+    value = load_json(FUN_REQUEST_MEMORY_FILE, {})
+    return value if isinstance(value, dict) else {}
+
+def _save_fun_request_memory(value):
+    # Keep only recent per-chat/per-user context entries.
+    cutoff = int(time.time()) - 7 * 86400
+    cleaned = {
+        key: item for key, item in value.items()
+        if isinstance(item, dict) and int(item.get("updated_at", 0)) >= cutoff
+    }
+    save_json(FUN_REQUEST_MEMORY_FILE, cleaned)
+
+def _is_fun_continuation(value):
+    text_value = (value or "").casefold().strip()
+    text_value = re.sub(r"[\\u064B-\\u065F\\u0670ـ]", "", text_value)
+    text_value = re.sub(r"[إأآٱ]", "ا", text_value)
+    text_value = re.sub(r"[^\\w\\s]", " ", text_value)
+    text_value = re.sub(r"\\s+", " ", text_value).strip()
+    phrases = (
+        "زيد", "زيد واحده", "زيد حبه", "زيد حبة", "زيد وحده", "زيد كمان",
+        "زيد بعد", "واحده ثانيه", "حبه ثانيه", "كمان", "بعد واحده",
+        "هات غيرها", "جيب غيرها", "غيرها", "واحد ثاني", "وحده ثانيه",
+        "اعطني غيرها", "مره ثانيه", "مرة ثانية", "بعد", "كمل"
+    )
+    return text_value in phrases
 
 def _detect_fun_channel_request(value):
     """Detect explicit requests for jokes, sadness messages, or pride posts."""
