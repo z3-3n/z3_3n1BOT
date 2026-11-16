@@ -2014,12 +2014,31 @@ FUN_CHANNELS = {
     "poetry": ["deved_iraq"],
 }
 
-# استبعاد الإعلانات والكلام الجانبي قبل اختيار المنشور.
+# استبعاد الإعلانات والترويج والرسائل الجانبية قبل اختيار المنشور.
 _FUN_AD_MARKERS = (
     "إعلان", "اعلان", "إعلانات", "اعلانات", "للتواصل", "للاشتراك",
     "اشترك", "انضم إلينا", "انضم الينا", "تابعونا", "تابع القناة",
     "قناتنا الثانية", "حسابنا", "واتساب", "خصم", "تخفيض", "عرض خاص",
-    "متجر", "للطلب", "راسلنا", "للحجز", "رابط القناة", "رابط حساب"
+    "متجر", "للطلب", "راسلنا", "للحجز", "رابط القناة", "رابط حساب",
+    "بوت", "تحميل", "جميع المواقع", "كل المواقع", "من المواقع",
+    "قناة جديدة", "قناتي", "قناتنا", "حسابي", "حسابنا", "للدعم",
+    "للتبرع", "للاعلان", "للإعلان", "سجل الآن", "سجل الان",
+    "اطلب الآن", "اطلب الان", "خدماتنا", "خدمة جديدة"
+)
+
+_FUN_AD_PATTERNS = (
+    r"@[A-Za-z0-9_]{4,}",                 # usernames / bot handles
+    r"(?i)\\b(?:bot|download|subscribe)\\b",
+    r"(?i)(?:تحميل|تنزيل).{0,35}(?:بوت|مواقع|يوتيوب|تيك.?توك|انست)",
+    r"(?i)(?:بوت|تطبيق).{0,45}(?:تحميل|تنزيل|جميع المواقع|كل المواقع)",
+    r"(?i)(?:رابط|للانضمام|انضمام).{0,35}(?:القناة|البوت|المجموعة)"
+)
+
+_FUN_SIDE_CHAT_MARKERS = (
+    "صباح الخير", "مساء الخير", "السلام عليكم", "وعليكم السلام",
+    "جمعة مباركة", "كيف الحال", "شلونكم", "منورين", "نورتوا",
+    "لا تنسوا", "لا تنسو", "تم النشر", "منقول", "إعادة توجيه",
+    "اعادة توجيه", "القادم أجمل", "القادم اجمل", "رأيكم", "ما رأيكم"
 )
 _FUN_TOPIC_MARKERS = {
     "joke": (
@@ -2042,15 +2061,34 @@ _FUN_TOPIC_MARKERS = {
 
 def _is_clean_fun_post(category, raw):
     text_value = (raw or "").strip()
-    if len(text_value) < 25 or not re.search(r"[\\u0600-\\u06FF]", text_value):
+    # منشورات قصيرة جداً أو بلا نص عربي ليست محتوى مناسباً.
+    if len(text_value) < 25 or not re.search(r"[\u0600-\u06FF]", text_value):
         return False
-    lowered = text_value.lower()
-    if re.search(r"(https?://|t\\.me/|www\\.)", lowered):
+
+    lowered = text_value.casefold()
+    normalized = re.sub(r"[إأآٱ]", "ا", lowered)
+
+    # الروابط وأسماء المستخدمين والإعلانات الصريحة تُرفض مباشرة.
+    if re.search(r"(https?://|t\.me/|www\.)", lowered):
         return False
-    if any(marker in lowered for marker in _FUN_AD_MARKERS):
+    if any(marker.casefold() in lowered or re.sub(r"[إأآٱ]", "ا", marker.casefold()) in normalized
+           for marker in _FUN_AD_MARKERS):
         return False
-    topic_markers = _FUN_TOPIC_MARKERS.get(category)
-    if topic_markers and not any(marker in lowered for marker in topic_markers):
+    if any(re.search(pattern, text_value) for pattern in _FUN_AD_PATTERNS):
+        return False
+    if any(marker in normalized for marker in _FUN_SIDE_CHAT_MARKERS):
+        return False
+
+    # لا يكفي وجود كلمة عامة مثل "قلب" لقبول منشور حزن؛
+    # اشترط مؤشرات واضحة من الفئة المطلوبة.
+    topic_markers = _FUN_TOPIC_MARKERS.get(category, ())
+    if not any(marker.casefold() in lowered or
+               re.sub(r"[إأآٱ]", "ا", marker.casefold()) in normalized
+               for marker in topic_markers):
+        return False
+
+    # استبعاد المنشورات التي تبدو كتنبيه أو نقاش جانبي لا كرسالة/اقتباس.
+    if re.search(r"(?i)(?:ملاحظة|تنبيه|تنويه|للتذكير|نرجو منكم|يرجى منكم)", text_value):
         return False
     return True
 
