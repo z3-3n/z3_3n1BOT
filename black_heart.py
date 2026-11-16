@@ -2040,9 +2040,9 @@ def _is_clean_fun_post(category, raw):
 def _detect_fun_channel_request(value):
     """Detect explicit requests for jokes, sadness messages, or pride posts."""
     text_value = (value or "").casefold()
-    text_value = re.sub(r"[\\u064B-\\u065F\\u0670ـ]", "", text_value)
+    text_value = re.sub(r"[\u064B-\u065F\u0670ـ]", "", text_value)
     text_value = re.sub(r"[إأآٱ]", "ا", text_value)
-    text_value = re.sub(r"\\s+", " ", text_value).strip()
+    text_value = re.sub(r"\s+", " ", text_value).strip()
 
     # Require a request-like expression so ordinary discussion about sadness,
     # jokes, or pride is not mistaken for a content request.
